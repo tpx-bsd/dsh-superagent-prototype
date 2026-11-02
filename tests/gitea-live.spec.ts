@@ -31,7 +31,8 @@ vi.setConfig({ testTimeout: 240_000 })
 const exec = promisify(execFile)
 
 describe.skipIf(!live)('a controlled Gitea server', () => {
-  const settings = live!
+  if (!live) return
+  const settings = live
   const tokens = () => (JSON.parse(readFileSync(settings.people, 'utf8')) as { users: Record<string, { token: string }> }).users
   const secrets = () => [...Object.values(tokens()).map(user => user.token), readFileSync(settings.agentTokenFile, 'utf8').trim()]
   /** A person's request to Gitea's API, as that person. */
@@ -115,14 +116,12 @@ describe.skipIf(!live)('a controlled Gitea server', () => {
     await host.runtime.idle()
     let ticket: Ticket = host.runtime.store.tickets.get((accepted.ticket as { ticket_id: string }).ticket_id)!
     await host.runtime.sendReplies()
-    // The next poll's window overlaps this one: what it reads again is a duplicate, and no second ticket starts.
     results.length = 0
     await poll()
     expect(results.every(outcome => outcome === 'duplicate')).toBe(true)
     expect(host.runtime.store.tickets.list()).toHaveLength(1)
     step('duplicatePoll', { replayed: [...results], tickets: host.runtime.store.tickets.list().length })
 
-    // The worker's checkout and push, with the git environment workers get.
     const env = gitEnv({ PATH: `${workerBin(directory)}:${process.env.PATH}` })
     for (const [name, value] of Object.entries(agentVariables(directory))) { if (value === undefined) delete env[name]; else env[name] = value }
     const git = (cwd: string, ...args: string[]) => exec('git', args, { cwd, env })
@@ -155,7 +154,6 @@ describe.skipIf(!live)('a controlled Gitea server', () => {
       question_for_trigger_id: request.id })
     await host.runTool(host.runtime.masterId, 'orchestrator_reply', { ticket_id: ticket.id, purpose: 'attention', human_action: 'Should it say hello or hi?',
       text: 'Should the greeting say hello or hi?' })
-    // A restart while the person answers: the answer arrives once, on the ticket.
     const cursorBeforeRestart = host.runtime.store.get(KV.gitea.cursor(key))
     await host.stop(true); h = undefined
     await as(settings.allowed, 'POST', `${repo}/issues/${issue.number}/comments`, { body: 'Say hello.' })
@@ -175,7 +173,6 @@ describe.skipIf(!live)('a controlled Gitea server', () => {
     const conversation = await GiteaApi.connect({ server: settings.url, repository: settings.repository, tokenFile: settings.agentTokenFile }).conversation(issue.number)
     const replies = conversation.filter(comment => comment.author.login === agentLogin).map(comment => comment.body.split('\n')[0])
     expect(replies).toEqual(['On it: changing the greeting.', 'Should the greeting say hello or hi?', 'Done: the greeting says hello; the PR waits for review.'])
-    // A reply sent again, as a retry after a lost answer is, finds its marker and posts nothing.
     const marker = /<!-- dsh-superagent:(.+) -->/.exec(conversation.find(comment => comment.author.login === agentLogin)!.body)![1]!
     expect(await sendGitea(host.runtime, { id: marker, text: 'On it: changing the greeting.', kind: 'reply',
       channel: ticket.channels[0]! })).toBe('sent')

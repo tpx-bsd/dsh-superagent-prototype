@@ -1,4 +1,3 @@
-/** The Gitea kind and plugin entry, and its poll of the repository's changes under one read position. */
 import type { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
 import { threadKey, type Trigger } from '../core/index.ts'
@@ -19,11 +18,9 @@ const GiteaConfigSchema = GiteaAccountsSchema.extend({ pollSeconds: z.number().i
   failuresBeforeError: z.number().int().min(1).max(20).default(3) }).strict()
 export type GiteaConfig = z.infer<typeof GiteaConfigSchema>
 const Login = z.string().regex(/^[A-Za-z0-9_.-]+$/)
-/** The configured repository, when the configuration names a usable one. */
 function configured(config: GiteaConfig): Pick<GiteaConnection, 'server' | 'repository'> | undefined {
   try { return config.repository ? { server: giteaServer(config.url), repository: config.repository } : undefined } catch { return undefined }
 }
-/** True when `meta` or an address belongs to the configured server and repository, so a changed configuration neither reads nor replies to the old one. */
 const sameRepository = (record: Record<string, unknown>, config: GiteaConfig): boolean => {
   const repository = configured(config)
   return !!repository && record.server === repository.server && sameName(String(record.repository ?? ''), repository.repository)
@@ -51,7 +48,6 @@ export const giteaKind: SourceKind<GiteaConfig> = {
   health: ['gitea'],
   channel: { allowed: sameRepository, send: sendGitea, link: giteaLink },
   threadContext: giteaThreadContext,
-  // `#12`, `12`, or the page of an Issue or pull request of the configured repository, names Thread 12.
   find: (query, config) => {
     const repository = configured(config)
     const page = repository && new RegExp(`^${repository.server.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/${repository.repository}/(?:issues|pulls)/(\\d+)`, 'i').exec(query.trim())
@@ -162,7 +158,6 @@ export async function pollFeed(ctx: SourceContext, signal: AbortSignal): Promise
   const received = triggers.filter(trigger => trigger.addressed || watched.has(threadKey(trigger.threads[0]!)))
     .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id))
   for (const trigger of received) {
-    // Stopping mid-poll throws so the read position stays where it was.
     if (signal.aborted) throw new Error('The Gitea Source stopped during the poll')
     await ctx.receive(trigger)
   }
@@ -172,9 +167,9 @@ export async function pollFeed(ctx: SourceContext, signal: AbortSignal): Promise
     ctx.threads.patch(thread, { title: issue.title })
     ctx.threads.describe(thread, { label: `#${issue.number} ${issue.title}`, url: issue.url, facts: { number: { value: `#${issue.number}` } } })
   }
-  ctx.state.set(cursor, before)
   await pollPulls(ctx, api, [...issues.filter(issue => issue.isPr && sameName(issue.author.login, agent)).map(issue => issue.number),
     ...ctx.tickets.open().flatMap(ticket => pullsOf(ticket, threads, true))])
+  ctx.state.set(cursor, before)
   return { received: received.length, skipped: tally.skipped }
 }
 /** Reads each pull request and applies the pull request rules; a failed read stays on its Thread and fails the poll once all were read. */

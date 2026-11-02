@@ -54,7 +54,6 @@ describe('setup', () => {
     })
     expect(await fill(scope)).toContain(`password=${TOKEN}`)
     expect(await fill(`${gitea.url}/acme/other.git`)).not.toContain('password=')
-    // Workers have no gh or tea of their own: either would act as the operator.
     await expect(exec(join(workerBin(h.directory), 'gh'), ['pr', 'list'])).rejects.toMatchObject({ stderr: expect.stringContaining('this installation\'s repository is on Gitea') })
     await expect(exec(join(workerBin(h.directory), 'tea'), [])).rejects.toMatchObject({ code: 1 })
   })
@@ -112,7 +111,6 @@ describe('pull requests', () => {
     gitea.fail('POST', /\/pulls$/, 'lost')
     expect(await report({ pr_open: { branch, title: 'Fix', body: 'Fix.' } })).toMatchObject({ pr: { number: 1, state: 'open' } })
     expect(h.runtime.store.tickets.get(ticket.id)!.follows).toHaveLength(1)
-    // The answer is lost and so is the look that follows it; a person closes the PR before the worker tries again.
     const second = `${branch.split('/')[0]}/2/${ticket.execution!.name}`
     gitea.fail('POST', /\/pulls$/, 'lost')
     gitea.fail('GET', /\/pulls$/, 503, 1)
@@ -185,12 +183,10 @@ describe('the Gitea Source', () => {
       const verdict = policy.gate(trigger, h.runtime.store.threads.get(threadKey(trigger.threads[0]!))!, [])
       return `${trigger.actor.id}:${verdict.admissible ? verdict.strength : verdict.reason}`
     }
-    // Only the listed person's mention is a request; an ordinary account on the bot list is at most an inferred candidate.
     expect(received.map(gate).sort()).toEqual(['Ghost:not_human', 'alice:explicit', 'alice:not_human', 'bob:not_a_member', 'carol:not_human',
       'renovate:not_human', 'review-runner:inferred'])
     const origin = received.find(trigger => trigger.meta.kind === 'issue')!
     const ticket = await accept(origin)
-    // The same records read again, as the next window's overlap reads them, are duplicates.
     received.length = 0
     gitea.tick(1)
     await poll()
@@ -226,6 +222,25 @@ describe('the Gitea Source', () => {
     await poll()
     expect(new Set(received.map(trigger => trigger.id)).size).toBe(5)
     expect(received.filter(trigger => h.runtime.engine.candidate(trigger.id)?.strength === 'explicit')).not.toHaveLength(0)
+  })
+  it('retries an unreported PR after its read fails without moving past it', async () => {
+    const { h, gitea, poll, received, accept, cursor, thread } = await source()
+    await poll()
+    gitea.tick(30)
+    gitea.issue(USERS.alice, 'Fix the login', '@agent fix the login')
+    gitea.tick(30)
+    await poll()
+    const ticket = await accept(received[0]!)
+    const before = cursor()
+    gitea.tick(30)
+    const number = gitea.issue(USERS.agent, 'Fix the login', 'The worker pushed this PR.', { head: `agent/${ticket.execution!.name}`, base: 'main' })
+    gitea.tick(30)
+    gitea.fail('GET', new RegExp(`/pulls/${number}$`), 500)
+    await expect(poll()).rejects.toThrow('pull request reads failed')
+    expect(cursor()).toBe(before)
+    gitea.tick(30)
+    await poll()
+    expect(h.runtime.store.tickets.get(ticket.id)?.follows).toContainEqual({ thread: thread(number), own: true })
   })
   it('replies once when the answer to a posted reply was lost, retries a 404, and drops a reply to a deleted or locked conversation', async () => {
     const { h, gitea } = await source()
