@@ -1,4 +1,3 @@
-/** GitHub pull request reads, and the shared pull request rules applied to GitHub's pull requests. */
 import { z } from 'zod'
 import type { Ticket } from '../core/index.ts'
 import type { SourceContext } from './host.ts'
@@ -15,7 +14,6 @@ const PullSchema = z.looseObject({
 export type Pull = z.infer<typeof PullSchema> & { number: number }
 export const readPull = async (ctx: SourceContext, number: number, signal?: AbortSignal): Promise<Pull> =>
   ({ ...await ctx.commands.withSignal(signal).api(PullSchema, `pulls/${number}`), number })
-/** GitHub's pull requests are the Threads `github:<number>`. */
 const GITHUB: rules.PullThreads = { source: SOURCE, scope: '' }
 function pullState(pr: Pull): rules.PullState {
   const endedAt = pr.merged_at ?? pr.closed_at

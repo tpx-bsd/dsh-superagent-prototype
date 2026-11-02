@@ -1,4 +1,3 @@
-/** `giteaHost`, the Gitea `RepositoryHost`: setup checks of the agent's token and push access, its git access, repository reads and pull requests. */
 import { existsSync } from 'node:fs'
 import { liveTicket } from '../core/index.ts'
 import { GiteaAccountsSchema, reason, type Machine, type RepositoryAccess } from '../deployment.ts'
@@ -13,7 +12,6 @@ import { agentPull, claimPull, pullEndNotices, ticketBranch } from './pull.ts'
 
 /** The Gitea versions a controlled check ran against; setup reports any other as untested rather than refusing it. */
 export const TESTED_VERSIONS: readonly string[] = ['28.3.0']
-/** The bundled helper: the built file of an installed package, else its source in a checkout, which node runs as it is. */
 const helperScript = (): string => {
   const built = packagePath('lib', 'gitea-credential.js')
   return existsSync(built) ? built : packagePath('src', 'sources', 'gitea-credential.ts')
@@ -21,10 +19,8 @@ const helperScript = (): string => {
 /** The git credential helper that answers with the agent's token only for the repository URL `scope`. */
 export const credentialHelper = (scope: string, login: string, tokenFile: string): string =>
   `!${[process.execPath, helperScript(), scope, login, tokenFile].map(shellQuote).join(' ')}`
-/** The marker in the description of the pull request a Ticket opened, which finds it again in any state. */
 const pullMarker = (ticketId: string): string => `<!-- dsh-superagent:pull:${ticketId} -->`
 
-/** A setup problem for a failed request, placed on the Gitea card, as specific as its status allows. */
 function setupProblem(error: unknown, url: string): SetupError {
   if (error instanceof SetupError) return error
   if (!(error instanceof GiteaError)) return new SetupError('giteaUnreachable', { url, output: reason(error) })

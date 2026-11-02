@@ -1,4 +1,3 @@
-/** Gitea Issues, pull requests and comments as Triggers: the identities of a repository's records, and who wrote them. */
 import { key, threadKey, type ChannelRef, type Trigger } from '../core/index.ts'
 import { escapeRegExp, sameName } from '../infra/text.ts'
 import { repositoryKey, type GiteaComment, type GiteaConnection, type GiteaIssue, type GiteaUser } from './gitea-api.ts'

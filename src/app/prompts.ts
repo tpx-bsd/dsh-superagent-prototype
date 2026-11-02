@@ -68,7 +68,6 @@ export const builtInParts = (): Readonly<Record<PartKey, BuiltInPart>> => parts 
     placeholders: ['{version}', '{mode}'] },
   'skill/feishu': { roles: BOTH, text: `${sourceSkills.feishu}\n\n## CLI usage\n${cliNotes}` },
   'skill/github': { roles: BOTH, text: `${sourceSkills.github}\n\n## CLI usage\n${cliNotes}` },
-  // Gitea workers have no CLI of the host's, so its skill takes no CLI notes.
   'skill/gitea': { roles: BOTH, text: sourceSkills.gitea },
 }
 /** The key of a built-in text, which an override's `base` records. */

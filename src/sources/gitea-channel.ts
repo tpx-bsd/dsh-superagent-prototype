@@ -1,4 +1,3 @@
-/** The Gitea Channel: comments in an Issue's or a pull request's conversation as the agent, `sent` or `gone`. */
 import type { OutboundMessage } from '../core/index.ts'
 import { sameName } from '../infra/text.ts'
 import { GiteaApi, GiteaError } from './gitea-api.ts'

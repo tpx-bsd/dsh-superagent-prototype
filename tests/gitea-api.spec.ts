@@ -41,7 +41,6 @@ const comment = (id: number, at = '2026-11-02T10:29:34+01:00') => ({ id, body: `
 
 describe('lists', () => {
   it('reads every page of a list whose server caps its pages, until X-Total-Count, with times in one form', async () => {
-    // The server pages by two whatever limit the client asks for, so every page is shorter than the limit.
     answer = (_request, url, response) => {
       const page = Number(url.searchParams.get('page'))
       json(response, [comment(page * 2 - 1), comment(page * 2)].filter(item => item.id <= 5), { 'x-total-count': '5' })

@@ -1,4 +1,3 @@
-/** The pull request rules every repository host shares: which pull requests a Ticket follows, their closes, and the end notices. */
 import { key, liveTicket, threadKey, type Follow, type OutboundMessage, type ThreadFact, type Ticket } from '../core/index.ts'
 import type { Deployment } from '../deployment.ts'
 import { sameName } from '../infra/text.ts'

@@ -1,4 +1,3 @@
-/** Gitea conversations for assessments and workers: `giteaThreadContext` by page, and the `gitea/` resources. */
 import type { Trigger } from '../core/index.ts'
 import { GiteaApi, type GiteaComment, type GiteaIssue } from './gitea-api.ts'
 import type { ContextMessage, ThreadContext } from './kind.ts'

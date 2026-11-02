@@ -164,7 +164,6 @@ export async function startRuntime(seed?: (store: Store) => void, repositoryHost
     const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
     const exited = { exitCode: 0, signal: null }
     const done = argv[0] === 'sh' && hooks.prepare ? hooks.prepare.then(() => exited) : Promise.resolve(exited)
-    // Another repository host's git access is read from the git configuration setup wrote, as worker git reads it.
     const lookup = argv.slice(0, 5).join(' ') === 'git config -z --show-origin --get-all'
       ? () => { try { return execFileSync('git', argv.slice(1), { env: gitEnv({ GIT_CONFIG_GLOBAL: workerGitConfig(directory), GIT_CONFIG_NOSYSTEM: '1' }), encoding: 'utf8' }) } catch { return '' } }
       : () => ''

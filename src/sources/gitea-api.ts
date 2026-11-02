@@ -1,7 +1,3 @@
-/**
- * The Gitea API of the configured repository, read and written as the agent account. The only place that sends Gitea requests,
- * reads the token file, parses Gitea's records into the types below and pages Gitea's lists.
- */
 import { z } from 'zod'
 import { key } from '../core/index.ts'
 import type { Deployment } from '../deployment.ts'

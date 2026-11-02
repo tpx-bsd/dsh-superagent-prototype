@@ -1,4 +1,3 @@
-/** The agent's Gitea token file, which only the operator's OS user may read; its text never leaves a request header or git's credential pipe. */
 import { lstatSync, readFileSync } from 'node:fs'
 
 /**
