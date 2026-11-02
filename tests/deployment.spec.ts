@@ -1,11 +1,18 @@
 import { execFile } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Config, executable, machineOf, resolveFeishuBot, type Machine, type Probe } from '../src/deployment.ts'
 import { credentialHelper, githubHost } from '../src/sources/github-host.ts'
+import type { Context } from '@deepseek-ai/cordis'
+import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
+import { Setup } from '../src/app/setup.ts'
+import { workerBin, workerGitConfig } from '../src/infra/environment.ts'
+import { SettingsSchema } from '../src/policy.ts'
+import { SetupError } from '../src/setup.ts'
+import type { RepositoryHost } from '../src/sources/host.ts'
 import { gitEnv } from './fixtures/git.ts'
 
 const exec = promisify(execFile)
@@ -98,5 +105,69 @@ describe('setup', () => {
     await refuses('feishuNoBot')
     program(join(dir, 'bin', 'lark-cli'), 'echo "not configured" >&2; exit 1')
     await refuses('feishuCliFailed', { output: expect.stringContaining('not configured') })
+  })
+})
+
+describe('Setup on a stand-in repository host', () => {
+  const access = { repository: 'acme/widgets', account: { command: 'repo-cli', cli: '/bin/echo', login: 'stand-in', commitEmail: 'stand-in@example.test' },
+    git: { origin: 'https://git.example.test', helper: '!stand-in-helper', insteadOf: ['ssh://git@git.example.test/'] } }
+  /** A stand-in host, simulated rather than a real GitHub, whose resolve answers `access` or throws `failure`. */
+  const stubHost = (failure?: Error) => ({ source: { kind: 'github', health: ['github'] },
+    resolve: vi.fn<RepositoryHost['resolve']>(async () => { if (failure) throw failure; return access }) })
+  /** DSH's subprocess service, answering git's credential lookup with `helper`, and recording what setup had done when git ran. */
+  const subprocess = (stateDir: string, helper?: string) => {
+    const seen: { gitconfig: string; global?: string; published?: boolean }[] = []
+    const state: { setup?: Setup } = {}
+    const spawn = vi.fn(({ argv }: { argv: readonly string[] }) => {
+      const lookup = argv.join(' ') === `git config -z --show-origin --get-all credential.${access.git.origin}.helper`
+      if (lookup) seen.push({ gitconfig: readFileSync(workerGitConfig(stateDir), 'utf8'), global: process.env.GIT_CONFIG_GLOBAL, published: state.setup?.configured() })
+      const text = lookup && helper ? `file:${workerGitConfig(stateDir)}\0${helper}\0` : ''
+      const reader = { readFrom: () => ({ text, nextOffset: text.length, lossy: false }) }
+      return { done: Promise.resolve({ exitCode: 0, signal: null }), collected: { stdout: reader, stderr: reader } }
+    })
+    return { service: { spawn } as unknown as SubprocessRuntime, seen, state }
+  }
+  const settings = (bot: string) => SettingsSchema.parse({ executor: { blockedCommands: ['personal-cli'] }, sources: {
+    github: { enabled: true, config: { repository: 'acme/widgets', cli: 'agent-cli' } }, feishu: { enabled: true, config: { cli: bot } } } })
+  const start = (repository: ReturnType<typeof stubHost>, process: ReturnType<typeof subprocess>) => new Setup({ machine: machine({ stateDir: join(dir, 'setup-state') }),
+    context: { subprocess: process.service, logger: { warn: vi.fn() } } as unknown as Context,
+    lifetime: new AbortController().signal, repository, restart: vi.fn() })
+
+  it('writes and applies the host\'s git access, checks git reads it, then publishes the deployment; Feishu failing leaves it out', async () => {
+    const stateDir = join(dir, 'setup-state'), bot = program(join(dir, 'bin', 'lark-broken'))
+    const repository = stubHost(), process = subprocess(stateDir, access.git.helper)
+    const before = globalThis.process.env.GIT_CONFIG_GLOBAL
+    const setup = process.state.setup = start(repository, process)
+    try {
+      expect(await setup.run(settings(bot))).toBe(true)
+      expect(repository.resolve).toHaveBeenCalledWith(expect.objectContaining({ stateDir }), { repository: 'acme/widgets', cli: 'agent-cli' }, expect.any(Function))
+      expect(process.seen).toEqual([{ gitconfig: expect.stringContaining(
+        '[credential "https://git.example.test"]\n\thelper = "!stand-in-helper"\n[url "https://git.example.test/"]\n\tinsteadOf = ssh://git@git.example.test/\n'),
+        global: workerGitConfig(stateDir), published: false }])
+      expect(setup.deployment).toMatchObject({ stateDir, ...access })
+      expect(setup.deployment).not.toHaveProperty('feishu')
+      expect(setup.feishuProblem).toMatchObject({ place: 'feishu', code: 'feishuNoApp' })
+      expect(readdirSync(workerBin(stateDir)).sort()).toEqual(['lark-cli', 'personal-cli', 'repo-cli'])
+      expect(readFileSync(join(workerBin(stateDir), 'personal-cli'), 'utf8')).toContain('use repo-cli, which acts as stand-in.')
+    } finally { setup.restore() }
+    expect(globalThis.process.env.GIT_CONFIG_GLOBAL).toBe(before)
+  })
+  it('restores the environment and publishes nothing when git does not read the host\'s credential helper', async () => {
+    const before = process.env.GIT_CONFIG_GLOBAL
+    const setup = start(stubHost(), subprocess(join(dir, 'setup-state')))
+    expect(await setup.run(settings(''))).toBe(false)
+    expect(setup.problem).toMatchObject({ place: 'deployment', code: 'gitTooOld' })
+    expect(setup.configured()).toBe(false)
+    expect(process.env.GIT_CONFIG_GLOBAL).toBe(before)
+  })
+  it('writes nothing when the host refuses the account, and checks a changed account through the same host', async () => {
+    const repository = stubHost(new SetupError('agentCliSignedOut'))
+    const setup = start(repository, subprocess(join(dir, 'setup-state')))
+    expect(await setup.run(settings(''))).toBe(false)
+    expect(setup.problem).toMatchObject({ place: 'github', code: 'agentCliSignedOut' })
+    expect(existsSync(workerGitConfig(join(dir, 'setup-state')))).toBe(false)
+    await expect(setup.checkAccounts('source:github', settings(''))).rejects.toThrow('cannot read its account')
+    await expect(setup.checkAccounts('source:feishu', settings(''))).resolves.toBeUndefined()
+    expect(repository.resolve).toHaveBeenCalledTimes(2)
   })
 })
