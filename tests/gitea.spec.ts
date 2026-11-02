@@ -98,6 +98,27 @@ describe('pull requests', () => {
     expect(await report({ pr_open: { branch, title: 'Fix the login', body: 'Again.' } })).toMatchObject({ pr: { number: 1 } })
     expect(created()).toBe(1)
   })
+  it('adopts the same PR after a maintainer removes its marker and after closure', async () => {
+    const { gitea, branch, report, created } = await workerTicket()
+    const draft = { pr_open: { branch, title: 'Fix', body: 'Fix.' } }
+    await report(draft)
+    gitea.issues.get(1)!.body = 'Edited description.'
+    expect(await report(draft)).toMatchObject({ pr: { number: 1, state: 'open' } })
+    gitea.close(1)
+    expect(await report(draft)).toMatchObject({ pr: { number: 1, state: 'closed' } })
+    expect(created()).toBe(1)
+    expect([...gitea.issues.values()].filter(issue => issue.pull)).toHaveLength(1)
+  })
+  it('does not adopt another author, branch or base despite a copied marker', async () => {
+    const { gitea, ticket, branch, report, created } = await workerTicket()
+    const marker = `<!-- dsh-superagent:pull:${ticket.id} -->`
+    gitea.issue(USERS.bob, 'Other author', marker, { head: branch, base: 'main' })
+    gitea.close(1)
+    gitea.issue(USERS.agent, 'Other branch', marker, { head: 'agent/other', base: 'main' })
+    gitea.issue(USERS.agent, 'Other base', marker, { head: branch, base: 'release' })
+    expect(await report({ pr_open: { branch, title: 'Fix', body: 'Fix.' } })).toMatchObject({ pr: { number: 4 } })
+    expect(created()).toBe(1)
+  })
   it('opens one PR when two reports race', async () => {
     const { gitea, branch, report, created } = await workerTicket()
     const draft = { pr_open: { branch, title: 'Fix', body: 'Fix.' } }

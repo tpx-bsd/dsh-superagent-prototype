@@ -73,11 +73,7 @@ export const giteaHost: RepositoryHost = {
     const pull = await GiteaApi.of(ctx.deployment, signal).pull(number)
     return () => claimPull(ctx, giteaThreads(giteaConnection(ctx.deployment)), ticketId, pull)
   },
-  /**
-   * Finds the pull request this Ticket opened from the branch, in any state, by the marker its description carries, and opens it
-   * only when there is none. A conflict, or a request whose answer was lost, looks again before it fails, so a retry adopts what
-   * an earlier attempt created and never opens a second one, even after a person closed the first.
-   */
+  /** Adopts the agent's same-repository branch/base PR in any state, including after a lost creation response or a description edit. */
   async openPull(ctx, ticketId, draft, signal) {
     const ticket = ctx.tickets.get(ticketId)
     if (!ticket || !liveTicket(ticket)) throw new Error('Ticket ended; do not open a pull request for it')
@@ -88,7 +84,7 @@ export const giteaHost: RepositoryHost = {
     const { defaultBranch } = await api.repository()
     const marker = pullMarker(ticketId)
     const opened = async (): Promise<GiteaPull | undefined> => (await api.pulls(ctx.deployment.account.login, defaultBranch))
-      .filter(pull => pull.head.ref === draft.branch && agentPull(pull, ctx.deployment) && pull.body.includes(marker))
+      .filter(pull => pull.head.ref === draft.branch && pull.base === defaultBranch && agentPull(pull, ctx.deployment))
       .sort((a, b) => b.number - a.number)[0]
     const pull = await opened() ?? await api.createPull({ head: draft.branch, base: defaultBranch, title: draft.title, body: `${draft.body}\n\n${marker}` })
       .catch(async (error: unknown) => {
