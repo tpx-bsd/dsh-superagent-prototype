@@ -1,4 +1,3 @@
-/** The GitHub binding of the repository host: the setup probes, the agent's git access to github.com, repository reads and pull request claims. */
 import { z } from 'zod'
 import { GithubAccountsSchema, executable, parsed, reason, type Machine, type Probe, type RepositoryAccess } from '../deployment.ts'
 import { shellQuote, workerBin } from '../infra/environment.ts'
@@ -14,7 +13,6 @@ export const credentialHelper = (cli: string): string => `!${shellQuote(cli)} au
 
 const GithubUser = z.object({ login: z.string().regex(/^[A-Za-z0-9-]+$/), id: z.number().int().positive() })
 const RepositoryPermission = z.object({ name: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/), push: z.boolean().nullable() })
-/** Verify the agent's GitHub CLI identity and push access to the configured repository. */
 async function resolve(machine: Pick<Machine, 'stateDir'>, config: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<RepositoryAccess> {
   const accounts = GithubAccountsSchema.parse(config ?? {})
   const remote = accounts.repository

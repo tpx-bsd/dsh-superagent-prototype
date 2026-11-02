@@ -1,4 +1,3 @@
-/** Subprocess wrapper for running the account CLI, lark-cli, and git commands under the deployment's configured accounts. */
 import { execFile } from 'node:child_process'
 import { basename } from 'node:path'
 import { promisify } from 'node:util'

@@ -1,4 +1,3 @@
-/** The Runtime on the simulated DSH host with a stand-in repository host: setup, pull request claims, end notices and Source skills go through it. */
 import { afterEach, expect, it, vi } from 'vitest'
 import { Commands } from '../src/infra/commands.ts'
 import { githubHost } from '../src/sources/github-host.ts'
@@ -8,7 +7,6 @@ import { feishu, startRuntime, type Host } from './fixtures/host.ts'
 let h: Host | undefined
 afterEach(async () => { await h?.stop(); h = undefined })
 
-/** A stand-in, not a live GitHub: GitHub's setup and reads, with claims and end notices of its own that record their calls. */
 const standIn = (refusal?: string) => ({ ...githubHost,
   resolve: vi.fn<RepositoryHost['resolve']>((...args) => githubHost.resolve(...args)),
   pullClaim: vi.fn<RepositoryHost['pullClaim']>(async () => () => refusal),

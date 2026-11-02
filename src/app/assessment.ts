@@ -51,7 +51,6 @@ export interface AssessorHost {
   readonly engine: Pick<EngineForMainSession, 'candidate' | 'candidateDelivered' | 'decide'>
   readonly commands: Commands
   readonly deployment: Deployment
-  /** The repository host whose files and directories an assessment reads. */
   readonly repository: Pick<RepositoryHost, 'readPath'>
   /** Durable effect queue through which candidate assessments are delivered. */
   readonly effects: Pick<Effects, 'enqueue' | 'handle'>

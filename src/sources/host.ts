@@ -65,10 +65,7 @@ export interface SourceContext {
   report(entry: string, health: Health): void
 }
 export const sourceContext = (host: SourceHost, kind: { kind: string; health: readonly string[] }): SourceContext => host.context(kind)
-/**
- * The repository host the deployment binds, GitHub today. Runtime holds one and passes it to setup, the assessor, the Executor
- * tools and the end notices, so shared code names no host.
- */
+/** The repository host the deployment binds. */
 export interface RepositoryHost {
   /** The Source it binds, as `SourceHost.context` takes it; `kind` also names its settings block, its `SETUP_FIELDS` and its built-in skill. */
   readonly source: { readonly kind: string; readonly health: readonly string[] }

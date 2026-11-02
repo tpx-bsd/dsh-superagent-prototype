@@ -1,4 +1,3 @@
-/** Plugin configuration, the data setup resolves for the repository host and the Feishu bot, and the CLI probes setup runs. */
 import { LIMITS } from './limits.ts'
 import { accessSync, constants, statSync } from 'node:fs'
 import { delimiter, isAbsolute, join } from 'node:path'
@@ -80,7 +79,6 @@ export function workerProbe(subprocess: SubprocessRuntime, stateDir: string, cwd
   return argv => runAsWorker(subprocess, ['env', `PATH=${path}`, ...argv], cwd, AbortSignal.any([signal, AbortSignal.timeout(60_000)]))
 }
 
-/** Parses CLI output as JSON of `schema`, or `undefined` when it is not. */
 export function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
   let value: unknown
   try { value = JSON.parse(text) } catch { return undefined /* Non-JSON output; the caller surfaces the setup failure. */ }

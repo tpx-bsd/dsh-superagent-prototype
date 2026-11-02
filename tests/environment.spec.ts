@@ -17,7 +17,7 @@ vi.setConfig({ testTimeout: 30_000 })
 const exec = promisify(execFile)
 let dir: string
 const program = (path: string, body: string): string => { writeFileSync(path, `#!/bin/sh\n${body}\n`); chmodSync(path, 0o755); return path }
-/** Worker shell environment after DSH strips credential-shaped variables, with git's messages in English whatever the machine's locale. */
+/** Worker shell environment after DSH strips credential-shaped variables. */
 const workerEnv = (env: Record<string, string | undefined>): Record<string, string> =>
   Object.fromEntries(Object.entries({ ...env, LC_ALL: 'C' }).filter((entry): entry is [string, string] => entry[1] !== undefined && !SENSITIVE_ENV_PATTERN.test(entry[0])))
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'environment-')); mkdirSync(join(dir, 'real')) })

@@ -14,7 +14,7 @@ import { CliError } from './commands.ts'
 const MARKER = '# Written by dsh-superagent on every start; edits are lost.'
 /** Markers of files written under the project's earlier names (`dsh-tag`, `dsh-go`, `dsh-freelancer`), which `dsh-superagent` owns and replaces too. */
 const LEGACY_MARKERS = ['dsh-tag', 'dsh-go', 'dsh-freelancer'].map(name => `# Written by ${name} on every start; edits are lost.`)
-/** Commands workers need, which `blockedCommands` cannot block: the shims and git. The repository host's account command is kept as well. */
+/** Commands workers need, which `blockedCommands` cannot block: the shims and git. */
 export const WORKER_COMMANDS: readonly string[] = ['gh', 'git', 'lark-cli']
 export const workerBin = (stateDir: string): string => join(stateDir, 'worker-bin')
 export const workerGitConfig = (stateDir: string): string => join(stateDir, 'worker-gitconfig')

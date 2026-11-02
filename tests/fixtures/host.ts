@@ -133,10 +133,7 @@ export function subagentRuntime(agents: Map<string, FakeAgent>) {
   return { service, settle, spawn, live: (id: string) => !!children.get(id)?.live }
 }
 
-/**
- * @param seed - writes to the database before the Runtime opens it, such as records an earlier version stored.
- * @param repositoryHost - the repository host the Runtime binds, GitHub's when omitted.
- */
+/** @param seed - writes to the database before the Runtime opens it, such as records an earlier version stored. */
 export async function startRuntime(seed?: (store: Store) => void, repositoryHost?: RepositoryHost) {
   const directory = mkdtempSync(join(tmpdir(), 'orchestrator-host-'))
   const AGENT = join(directory, 'agent-gh'), BOT = join(directory, 'lark-bot')

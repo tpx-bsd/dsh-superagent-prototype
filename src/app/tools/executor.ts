@@ -16,7 +16,6 @@ export interface ExecutorToolsHost {
   readonly sessions: Pick<Sessions, 'relay' | 'notify'>
   readonly resources: ResourceHost
   readonly deployment: Pick<Deployment, 'account'>
-  /** Reads a reported pull request through the repository host, whose rules govern the claim it returns. */
   pullClaim(ticketId: string, number: number, signal?: AbortSignal): ReturnType<RepositoryHost['pullClaim']>
   sendReplies(): Promise<void>
 }

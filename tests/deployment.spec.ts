@@ -111,10 +111,8 @@ describe('setup', () => {
 describe('Setup on a stand-in repository host', () => {
   const access = { repository: 'acme/widgets', account: { command: 'repo-cli', cli: '/bin/echo', login: 'stand-in', commitEmail: 'stand-in@example.test' },
     git: { origin: 'https://git.example.test', helper: '!stand-in-helper', insteadOf: ['ssh://git@git.example.test/'] } }
-  /** A stand-in host, simulated rather than a real GitHub, whose resolve answers `access` or throws `failure`. */
   const stubHost = (failure?: Error) => ({ source: { kind: 'github', health: ['github'] },
     resolve: vi.fn<RepositoryHost['resolve']>(async () => { if (failure) throw failure; return access }) })
-  /** DSH's subprocess service, answering git's credential lookup with `helper`, and recording what setup had done when git ran. */
   const subprocess = (stateDir: string, helper?: string) => {
     const seen: { gitconfig: string; global?: string; published?: boolean }[] = []
     const state: { setup?: Setup } = {}

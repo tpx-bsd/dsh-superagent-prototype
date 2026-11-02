@@ -11,7 +11,6 @@ export interface SetupHost {
   readonly context: Context
   readonly machine: Machine
   readonly lifetime: AbortSignal
-  /** The repository host whose account setup checks and whose git access it writes. */
   readonly repository: Pick<RepositoryHost, 'source' | 'resolve'>
   restart(): void
 }

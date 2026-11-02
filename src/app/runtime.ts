@@ -85,7 +85,6 @@ export class Runtime extends Service implements SourceHost {
   private readonly toolHost: MainToolsHost & ExecutorToolsHost
   /** Non-zero while a main-Session tool is executing an Engine command, suppressing self-triggered domain event notices. */
   private quiet = 0
-  /** @param repository - the repository host this deployment binds; setup, reads, pull request claims and end notices all use it. */
   constructor(ctx: Context, readonly machine: Machine, restart: () => void, repository: RepositoryHost = githubHost) {
     super(ctx, 'orchestrator')
     const runtime = this
