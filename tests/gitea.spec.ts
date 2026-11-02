@@ -23,7 +23,7 @@ import { testMachine } from './fixtures/deployment.ts'
 vi.setConfig({ testTimeout: 30_000 })
 const exec = promisify(execFile)
 let h: Host | undefined, gitea: StandInGitea | undefined
-afterEach(async () => { await h?.stop(); h = undefined; await gitea?.stop(); gitea = undefined })
+afterEach(async () => { vi.restoreAllMocks(); await h?.stop(); h = undefined; await gitea?.stop(); gitea = undefined })
 
 const config = (stand: StandInGitea, overrides: Record<string, string> = {}) => ({ url: stand.url, repository: REPOSITORY, tokenFile: stand.tokenFile, ...overrides })
 async function giteaRuntime() {
@@ -190,7 +190,7 @@ describe('the Gitea Source', () => {
     received.length = 0
     gitea.tick(1)
     await poll()
-    expect(received).toEqual([])
+    expect(received.every(trigger => trigger.id === origin.id)).toBe(true)
     expect(h.runtime.store.tickets.list()).toHaveLength(1)
     await h.runtime.sendReplies()
     expect(gitea.agentComments(request).map(comment => comment.body)).toEqual(['Echo of @agent', expect.stringMatching(/^On it\.\n\n<!-- dsh-superagent:.+ -->$/)])
@@ -222,6 +222,44 @@ describe('the Gitea Source', () => {
     await poll()
     expect(new Set(received.map(trigger => trigger.id)).size).toBe(5)
     expect(received.filter(trigger => h.runtime.engine.candidate(trigger.id)?.strength === 'explicit')).not.toHaveLength(0)
+  })
+  it('receives a new opening edited past a frozen window, while ignoring an older description', async () => {
+    const { gitea, poll, received } = await source()
+    const old = gitea.issue(USERS.alice, 'Old', '@agent old')
+    gitea.tick(30)
+    await poll()
+    gitea.tick(30)
+    const number = gitea.issue(USERS.alice, 'New', '@agent fix')
+    gitea.tick(30)
+    const fetch = globalThis.fetch
+    let edited = false
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (...args) => {
+      const response = await fetch(...args)
+      if (!edited && String(args[0]).endsWith('/api/v1/version')) {
+        edited = true
+        gitea.tick(1)
+        for (const id of [old, number]) gitea.issues.get(id)!.updated = Date.parse(gitea.now)
+      }
+      return response
+    })
+    await poll()
+    expect(received).toEqual([])
+    gitea.tick(60)
+    await poll()
+    expect(received.map(trigger => trigger.meta.number)).toEqual([number])
+    await poll()
+    expect(new Set(received.map(trigger => trigger.id)).size).toBe(1)
+  })
+  it('rejects an abort during the final receive without committing the cursor', async () => {
+    const { gitea, poll, cursor } = await source()
+    await poll()
+    const before = cursor()
+    gitea.tick(30)
+    gitea.issue(USERS.alice, 'Request', '@agent fix')
+    gitea.tick(30)
+    const controller = new AbortController()
+    await expect(poll(controller.signal, () => controller.abort())).rejects.toThrow('stopped during the poll')
+    expect(cursor()).toBe(before)
   })
   it('retries an unreported PR after its read fails without moving past it', async () => {
     const { h, gitea, poll, received, accept, cursor, thread } = await source()
@@ -277,8 +315,8 @@ describe('the Gitea Source', () => {
     first.gitea.tick(30)
     const again = await source(first.gitea, directory)
     await again.poll()
-    expect(again.received.map(trigger => trigger.text)).toEqual(['Also the logout, please.'])
-    expect(again.h.runtime.store.triggers.disposition(again.received[0]!.id)?.fanout).toEqual([ticket.id])
+    expect(again.received.filter(trigger => trigger.meta.kind === 'comment').map(trigger => trigger.text)).toEqual(['Also the logout, please.'])
+    expect(again.h.runtime.store.triggers.disposition(again.received.find(trigger => trigger.meta.kind === 'comment')!.id)?.fanout).toEqual([ticket.id])
     expect(again.h.runtime.store.tickets.list()).toHaveLength(1)
     await vi.waitFor(async () => { await again.h.runtime.sendReplies(); expect(first.gitea.agentComments(request)).toHaveLength(1) }, { timeout: 20_000 })
   })

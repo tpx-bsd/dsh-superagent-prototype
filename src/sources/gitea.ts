@@ -135,10 +135,18 @@ async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
 export async function pollFeed(ctx: SourceContext, signal: AbortSignal): Promise<{ received: number; skipped: number }> {
   const connection = giteaConnection(ctx.deployment)
   const api = GiteaApi.of(ctx.deployment, signal)
-  const cursor = KV.gitea.cursor(repositoryKey(connection.server, connection.repository))
+  const repository = repositoryKey(connection.server, connection.repository)
+  const cursor = KV.gitea.cursor(repository)
+  const activation = KV.gitea.activated(repository)
+  const checkStopped = () => { if (signal.aborted) throw new Error('The Gitea Source stopped during the poll') }
   const { at: before } = await api.version()
   const through = ctx.state.get(cursor)
-  if (!through) { ctx.state.set(cursor, before); return { received: 0, skipped: 0 } }
+  checkStopped()
+  if (!through) {
+    ctx.atomic(() => { ctx.state.set(activation, before); ctx.state.set(cursor, before) })
+    return { received: 0, skipped: 0 }
+  }
+  const activated = ctx.state.get(activation) ?? through
   const window = { since: cursorAt(through), before }
   const tally = { skipped: 0 }
   const issues = await api.issues(window, tally)
@@ -149,7 +157,7 @@ export async function pollFeed(ctx: SourceContext, signal: AbortSignal): Promise
   const triggers: Trigger[] = []
   for (const issue of issues) {
     const author = authorOf(issue.author, issue.migrated, agent, bots)
-    if (author.kind !== 'self' && issue.createdAt >= window.since) triggers.push(issueTrigger(connection, issue, author, agent))
+    if (author.kind !== 'self' && issue.createdAt >= activated) triggers.push(issueTrigger(connection, issue, author, agent))
   }
   for (const comment of comments) {
     const author = authorOf(comment.author, comment.migrated, agent, bots)
@@ -158,8 +166,9 @@ export async function pollFeed(ctx: SourceContext, signal: AbortSignal): Promise
   const received = triggers.filter(trigger => trigger.addressed || watched.has(threadKey(trigger.threads[0]!)))
     .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id))
   for (const trigger of received) {
-    if (signal.aborted) throw new Error('The Gitea Source stopped during the poll')
+    checkStopped()
     await ctx.receive(trigger)
+    checkStopped()
   }
   const threads = giteaThreads(connection)
   for (const issue of issues) {
@@ -169,7 +178,8 @@ export async function pollFeed(ctx: SourceContext, signal: AbortSignal): Promise
   }
   await pollPulls(ctx, api, [...issues.filter(issue => issue.isPr && sameName(issue.author.login, agent)).map(issue => issue.number),
     ...ctx.tickets.open().flatMap(ticket => pullsOf(ticket, threads, true))])
-  ctx.state.set(cursor, before)
+  checkStopped()
+  ctx.atomic(() => { ctx.state.set(activation, activated); ctx.state.set(cursor, before) })
   return { received: received.length, skipped: tally.skipped }
 }
 /** Reads each pull request and applies the pull request rules; a failed read stays on its Thread and fails the poll once all were read. */

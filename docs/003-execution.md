@@ -178,7 +178,7 @@ A notified Issue or pull request whose reads keep failing is dropped a day after
 
 Its read position stays where it was, so a later notification or a poll of its Thread reads what the failed reads missed.
 
-Gitea polls repository Issues and comments within a server-time window, with a five-second overlap. Its first poll establishes a baseline. Later polls advance the repository cursor after receiving the covered Triggers. A failed feed read or interrupted intake leaves that cursor unchanged. Bound PRs are read directly each round for merge and close. Consecutive failures appear under `gitea`, after three rounds by default. Malformed list items are skipped and counted. HTTP 404 remains retryable.
+Gitea polls repository Issues and comments within a server-time window, with a five-second overlap. Its first poll saves a repository activation time and a baseline cursor. Openings created since activation remain eligible when later edits move them into another polling window. Descriptions from before activation stay ignored. Later polls advance the repository cursor after receiving the covered Triggers. A failed feed read or interrupted intake leaves that cursor unchanged. Bound PRs are read directly each round for merge and close. Consecutive failures appear under `gitea`, after three rounds by default. Malformed list items are skipped and counted. HTTP 404 remains retryable.
 
 The Feishu event consumer reports every failure, and polling of subscribed topics keeps each failure on its Thread.
 
