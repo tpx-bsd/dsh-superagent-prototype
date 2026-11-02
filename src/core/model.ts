@@ -1,5 +1,5 @@
 /** Domain model of a proactive agent: the concepts and their invariants, independent of any source, policy, or executor. */
-import type { SourceScope } from './ports.ts'
+import type { Repositories, SourceScope } from './ports.ts'
 import type { Reason } from './reasons.ts'
 
 /** Actor identity in the source's own vocabulary; Policy decides which actors may originate work on that Source. */
@@ -346,6 +346,14 @@ export const latestReport = (ticket: Pick<Ticket, 'assignments'>): Assignment['r
 export function readUntil(ticket: Pick<Ticket, 'assignments'>, progress = true): string {
   const report = ticket.assignments.findLast(assignment => assignment.report && (progress || assignment.report.state !== 'progress'))?.report
   return [report?.at ?? '', ...ticket.assignments.map(assignment => assignment.idleAt ?? '')].reduce((a, b) => a > b ? a : b)
+}
+/** Whether a stored trigger input still carries human authority under the current Source policy. */
+export type InputAuthority = (input: Extract<TicketInput, { kind: 'trigger' }>) => boolean
+export function inputAuthority(triggers: Pick<Repositories['triggers'], 'get'>, sources: Pick<SourceScope, 'permitsHuman'>): InputAuthority {
+  return input => {
+    const trigger = input.human ? triggers.get(input.triggerId) : undefined
+    return !!trigger && currentHuman(trigger, sources)
+  }
 }
 /**
  * Whether a ticket waits for a person: its latest Assignment reported blocked or failed, and no person's message reached it

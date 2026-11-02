@@ -4,7 +4,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { mkdir, rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { currentHuman, key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
+import { inputAuthority, key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
 import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, SourceScope, Ticket, TicketInput, Trigger }
   from '../core/index.ts'
 import type { Machine } from '../deployment.ts'
@@ -266,8 +266,7 @@ export class DshExecutor implements Executor {
   /** Enqueues a `delivery` effect to steer pending inputs into `ticket`'s running worker session. */
   deliver(ticket: Ticket, _assignment: Assignment): void { this.host.effects.enqueue('delivery', ticket.id, { ticketId: ticket.id }) }
   private humanInput(input: TicketInput | undefined): boolean {
-    const trigger = input?.kind === 'trigger' && input.human ? this.host.store.triggers.get(input.triggerId) : undefined
-    return !!trigger && currentHuman(trigger, this.host.sources)
+    return input?.kind === 'trigger' && inputAuthority(this.host.store.triggers, this.host.sources)(input)
   }
   private fromPerson(input: TicketInput | undefined): boolean {
     return input?.kind === 'trigger' ? this.humanInput(input) && !input.context : input?.kind === 'text'
@@ -308,7 +307,7 @@ export class DshExecutor implements Executor {
         const inputId = ticket?.undelivered[0]
         if (!ticket || !assignment || inputId === undefined) return
         const input = ticket.inputs.find(item => item.id === inputId)
-        if (input?.kind === 'trigger' && this.waitsForPerson(ticket) && !this.humanInput(input)) return
+        if (input?.kind === 'trigger' && this.waitsForPerson(ticket) && !this.humanInput(input)) throw new Later('The worker is waiting for a person')
         // Waking an idle worker reserves a slot (including the extra slot reserved for human follow-ups).
         const sessionId = workerSessionId(ticketId)
         if (!woken && !this.running(ticket)) {
@@ -335,10 +334,12 @@ export class DshExecutor implements Executor {
     } finally { if (woken) this.slots.free(ticketId) }
   }
   private async deliverInput(ticket: Ticket, assignment: Assignment, input: TicketInput): Promise<void> {
-    // Re-check right before session delivery because the ticket may have ended while awaiting `sourceLink`.
     const live = () => {
       const current = this.host.store.tickets.get(ticket.id)
       if (!current || !liveTicket(current) || runningAssignment(current)?.id !== assignment.id) throw new Error('The ticket ended or another Assignment took it over')
+      const pending = current.inputs.find(item => item.id === input.id)
+      if (!pending || !current.undelivered.includes(input.id)) throw new Later('The input no longer waits for delivery')
+      if (pending.kind === 'trigger' && this.waitsForPerson(current) && !this.humanInput(pending)) throw new Later('The worker is waiting for a person')
       // A stop of the worker's background work that started meanwhile ends with a cancel, which would drop the Input.
       if (this.stopping.has(ticket.id)) throw new Later('The worker\'s background work is stopping')
     }

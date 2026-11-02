@@ -1,6 +1,6 @@
 /** Shared base class and configuration for Engine domain parts. */
 import { UserError } from './errors.ts'
-import { currentHuman, followupOwners, reached, threadKey, waitsForPerson } from './model.ts'
+import { currentHuman, followupOwners, inputAuthority, reached, threadKey, waitsForPerson } from './model.ts'
 import type { Thread, ThreadRef, Ticket, TicketInput, Trigger } from './model.ts'
 import type { Assessor, AssessmentOutcome, DomainEvent, DomainEvents, Executor, Outbox, Policy, Repositories, SourceScope } from './ports.ts'
 
@@ -30,7 +30,7 @@ export abstract class EnginePart {
   protected owners(trigger: Trigger): string[] { return followupOwners(trigger, this.repo, this.options.scope) }
   protected human(trigger: Trigger | undefined): boolean { return !!trigger && currentHuman(trigger, this.options.scope) }
   protected humanInput(input: TicketInput | undefined): boolean {
-    return input?.kind === 'trigger' && !!input.human && this.human(this.repo.triggers.get(input.triggerId))
+    return input?.kind === 'trigger' && inputAuthority(this.repo.triggers, this.options.scope)(input)
   }
   protected automatic(input: TicketInput | undefined): boolean {
     return input?.kind === 'note' || (input?.kind === 'trigger' && !this.humanInput(input))
