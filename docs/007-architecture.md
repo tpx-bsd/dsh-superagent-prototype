@@ -36,7 +36,7 @@ Shutdown cancels turns, waits for passes, effects and agents, restores the proce
 
 | Part | Module | Does |
 | --- | --- | --- |
-| Setup | `src/app/setup.ts` | Resolves the repository and the accounts by probing their CLIs the way worker shells run them, writes and applies the workers' environment and command shims, and keeps the setup problems; Settings checks a changed account through it, and restarts through it, which runs setup again |
+| Setup | `src/app/setup.ts` | Resolves the repository and the agent's account through the repository host, and the Feishu bot, by probing their CLIs the way worker shells run them, writes and applies the workers' environment, command shims and git access, checks git reads that access, and keeps the setup problems; Settings checks a changed account through it, and restarts through it, which runs setup again |
 | Passes | `src/app/passes.ts` | One pass at a time, every two seconds and whenever a command asks: the due effects, then `Engine.evaluateDue`; a Source's Trigger reaches the Engine through it |
 | Outbox | `src/app/outbox.ts` | The Engine's `Outbox` port, and the only writer of the receipts: `send` keeps a message's receipt and queues its `reply` effect in one transaction, and the effect's handler sends it through `SourceRegistry.send`; a message waits while its Source is off, and is dropped when the conversation is gone or not listened to |
 | Notices | `src/app/notices.ts` | Converts domain events and worker activity into main-Session messages. `eventNotice` handles domain notices; `reportRelay` forwards questions immediately, keeps ordinary progress on its Ticket, and relays other reports; `followupRelay` names the Tickets that own a human follow-up. Relays arriving during a turn are delivered together at its next step through the DeepSeek Harness inbox |
@@ -106,7 +106,7 @@ After a change, the Engine emits an event from `DomainEvents` in `src/core/ports
 
 `trigger.received`, `eval.started`, `decision.recorded`, `ticket.created`, `ticket.resumed`, `ticket.ended`, `assignment.started`, `assignment.ended`, `thread.subscribed`, `thread.unsubscribed`, `trigger.requeued`, or `policy.changed`.
 
-Runtime turns `ticket.ended`, `trigger.requeued` and `thread.unsubscribed` into notices. A human `trigger.received` delivered to Tickets becomes a follow-up relay. `pullEndNotices` sends one chat notice, using a stable id, when a Ticket ends merged or closed. Other events currently have no consumer.
+Runtime turns `ticket.ended`, `trigger.requeued` and `thread.unsubscribed` into notices. A human `trigger.received` delivered to Tickets becomes a follow-up relay. The repository host's `pullEndNotices` sends one chat notice, using a stable id, when a Ticket ends merged or closed. Other events currently have no consumer.
 
 ### Model
 
@@ -159,7 +159,7 @@ Its interfaces are grouped by purpose:
 - **Outbox receipts:** `replyStatus` and `receipts`, written only by Outbox. Receipt operations are `get`, `waiting`, `behind`, `add`, `settle` and `withdraw`. `behind` checks whether an earlier message for the same Ticket and conversation is waiting with fewer than three failures. A withdrawn message settles with `channelGone` or `channelIgnored`. Read queries expose failed and dropped replies through `failingReplies`, `droppedReplies` and `droppedSince`.
 - **Typed key-value records:** `get`, `set`, `delete` and `keys`, using entries from `KV`.
 
-`afterCommit` runs an action only after the transaction commits, never after rollback. Runtime reads records in their stored shape; the schema 11 migration converts older supported records at startup.
+`afterCommit` runs an action only after the transaction commits, never after rollback. Runtime reads records in their stored shape; the schema 11 migration converts older supported records at startup. Nothing setup resolves is stored, so a change to the repository host needs no migration.
 
 ### Effects
 
@@ -193,6 +193,15 @@ Generic code accesses Source behavior through the registry. `send(message, comma
 Plugins receive `SourceHost`: the registry and `context(kind)`. The kind itself uses a narrower `SourceContext`, built by `sourceContextOf` in `src/app/source-context.ts`.
 
 That context supplies deployment and commands, setup readiness (`ready`, `configured`, `problem`), configuration, `receive`, `atomic`, and typed `state`. It also exposes Thread reads and metadata writes, Ticket reads and binding/closure commands, Trigger reads, `notify` through Outbox, and `report` for declared health entries.
+
+The repository the deployment works on is bound through one `RepositoryHost` (`src/sources/host.ts`), which Runtime selects once, `githubHost` (`src/sources/github-host.ts`) by default, and which a test may replace. It is not a Source kind: setup needs it before any Source plugin registers, and it works while the GitHub plugin is off. It has the Source it binds (`source`), whose kind names its settings block, `SETUP_FIELDS` entry, setup place and built-in skill, and four operations:
+
+- `resolve` checks the account CLI and its push access, and returns a `RepositoryAccess`: the canonical repository, the `Account` (`command`, the name workers call its CLI by, `cli`, `login` and `commitEmail`) and the `GitAccess` (`origin`, `helper` and the `insteadOf` prefixes) that setup writes into the worker git configuration and checks. It throws `SetupError`s placed at the Source's kind.
+- `readPath` reads a file or a directory of the configured repository for the assessor.
+- `pullClaim` reads a pull request an Executor reported before the report's transaction, and returns a synchronous claim that the report runs inside it, so a refused claim records no report, relay or binding.
+- `pullEndNotices` gives the chat notices of a Ticket that ended merged or closed.
+
+Setup, the assessor, the Executor tools, the end notices and the Source skills use the same host. The `Deployment` that setup resolves is the `Machine`, the `RepositoryAccess` and the Feishu bot; it is rebuilt on every start and never stored.
 
 ### DshExecutor
 
@@ -278,12 +287,11 @@ Some generic modules still refer directly to GitHub or Feishu:
 
 - Outbox applies the Feishu chat word limit.
 - `src/app/links.ts` resolves Feishu message links and `repliedTo`. It and Runtime read settings with `feishuSettings`.
-- `src/app/resources.ts` reads the `feishu/` and `github/` originals; `src/app/cards.ts` uses `pullOf` for Ticket cards.
-- Runtime sends `pullEndNotices` for merged or closed Tickets.
-- Executor tools bind reported pull requests with `readPull` and `claimPull`, using the GitHub context exposed by Runtime.
-- MasterAssessor reads repository files with `readRepositoryPath`.
-- Sessions and Prompts register built-in skills only for GitHub and Feishu. Migration converts their schema-10 records.
+- `src/app/resources.ts` reads the `feishu/` and `github/` originals, and `src/app/cards.ts` uses `pullOf` for Ticket cards. Both read what the GitHub and Feishu Sources stored, such as `github:<number>` Threads a Ticket follows, so they stay Source-specific; a second repository host adds its own readers there.
+- Runtime selects `githubHost`, the only place shared code names the GitHub binding. Setup, MasterAssessor, the Executor tools and the end notices reach it as a `RepositoryHost`.
+- The bundled skills are the Source skills (`SourceSkill` in `src/app/skill-files.ts`): Feishu's with a working bot, then the repository host's. Migration converts their schema-10 records.
 - Setup probes only GitHub and Feishu account fields (`SETUP_FIELDS`). Only those Sources receive account setup problems through `SourceContext.problem`.
+- `Commands.api`, `pages` and `gh` are the GitHub Source's transport, limited to the configured repository; no shared module calls them.
 
 
 ## Modules
@@ -291,7 +299,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | Path | Responsibility |
 | --- | --- |
 | `src/index.ts` | The main plugin entry: reads the machine settings, starts the Runtime, and gives it the restart that a save of a Source's account uses |
-| `src/deployment.ts` | The plugin `Config` and `Machine`; `resolveDeployment` and `resolveFeishuBot` read the repository and the accounts from the Source settings, each CLI run as Executor shells run it; `SETUP_FIELDS` lists the Source fields setup reads. The code names no person, account or organization |
+| `src/deployment.ts` | The plugin `Config` and `Machine`; `Deployment`, with the `RepositoryAccess` (`Account`, `GitAccess`) a repository host resolves; `resolveFeishuBot` reads the Feishu bot from its Source settings, its CLI run as Executor shells run it, as `workerProbe` runs every setup probe; `SETUP_FIELDS` lists the Source fields setup reads. The code names no person, account or organization |
 | `src/setup.ts` | Setup problems: `SetupError`, with a code, the place that fixes it and the English text the log, the main Session and the panel share |
 | `src/policy.ts` | The Policy: the settings schemas by block, the Policy version, the gate and Mandate revalidation |
 | `src/admission.ts` | The admission table's values, each cell's options and defaults, shared with the panel |
@@ -328,7 +336,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/settings-history.ts` | `policyHistory`: each saved settings revision with what it changed from the one before |
 | `src/app/prompts.ts` | Prompts, `builtInParts`, the built-in parts a team may override, and `promptParts`, the order of a role's prompt sections |
 | `src/app/context.ts` | The built-in prompt text, read from `prompts/`, and the transcript entries Sessions read |
-| `src/app/skill-files.ts` | Packaged text: `promptFile`, which joins a file's one-sentence lines into paragraphs, and the bundled skills |
+| `src/app/skill-files.ts` | Packaged text: `promptFile`, which joins a file's one-sentence lines into paragraphs, and the bundled skills, the Source skills (`SourceSkill`, `isSourceSkill`) |
 | `src/app/sessions.ts` | Sessions |
 | `src/app/delivery.ts` | `AgentDelivery`: delivers a message to a DeepSeek Harness agent once per request id, also across a restored Session |
 | `src/app/retry-health.ts` | `RetryHealth`: which Sessions wait on a model budget retry, for the `models` health entry |
@@ -353,14 +361,14 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/views/overview.ts` | The overview: Tickets that need a person, problems, the last day's flow and the Executor's load |
 | `src/executor/dsh.ts` | The DshExecutor, `WorkerSlots`, `ticketExecution`, `inputMessage` and `mandateInstructions` |
 | `src/executor/background.ts` | A worker's background work in DeepSeek Harness, the shell jobs its Session owns (`ctx.jobs`) and its subagents (`ctx.subagents`): `runningJobs`, `untilQuiet`, `killJobs`, `collectJobs`, `stopSubagents`, `stopBackground`, `until`, and `cancelled`, the workers whose turn a stop of their subagents cancelled |
-| `src/infra/commands.ts` | `Commands`, the CLI transport: `run`; `api` and `pages`, limited to the configured repository and validated; `lark` as the bot; `git`. `CliError` carries the code a command's output reports, such as a GitHub HTTP status, and a command that prints nothing fails with how it ended, never with its arguments; `validItems` skips and counts the malformed items of a list |
-| `src/infra/environment.ts` | The agent's process environment: command shims, the git configuration and credential helper, `runAsWorker`, and the checks of the environment and of a Ticket's directory |
+| `src/infra/commands.ts` | `Commands`, the CLI transport: `run`; `gh`, `api` and `pages`, the GitHub Source's transport, limited to the configured repository and validated; `lark` as the bot; `git`. `CliError` carries the code a command's output reports, such as a GitHub HTTP status, and a command that prints nothing fails with how it ended, never with its arguments; `validItems` skips and counts the malformed items of a list |
+| `src/infra/environment.ts` | The agent's process environment: command shims, the account command among them, the git configuration with the repository host's git access, `runAsWorker`, and the checks of the environment and of a Ticket's directory |
 | `src/infra/paths.ts` | The package's root, where packaged files are |
 | `src/infra/text.ts` | Word counts and the chat message limit, `fill` and `sameName` |
 | `src/infra/health.ts` | The `HealthBoard`, every part's health entry, each claimed by its one writer |
 | `src/sources/kind.ts` | The `SourceKind` protocol |
 | `src/sources/registry.ts` | `SourceRegistry` |
-| `src/sources/host.ts` | `SourceHost`, `SourceContext`, `Health`, `health` and the fixed health texts |
+| `src/sources/host.ts` | `SourceHost`, `SourceContext`, `RepositoryHost`, `Health`, `health` and the fixed health texts |
 | `src/sources/poll.ts` | What GitHub and Feishu polling share: `POLL_HORIZON_MS`, `polled`, `cursorAt`, and `pollThreads`, which keeps a failure on its Thread as `pollError` |
 | `src/sources/github.ts` | The GitHub kind and plugin entry, exported as `./github-watch`: a poll round of notifications, the pull requests of open Tickets with their CI, and subscribed Threads |
 | `src/sources/github-trigger.ts` | GitHub comments, reviews, Issue bodies and CI changes as Triggers, and GitHub addresses |

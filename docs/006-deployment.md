@@ -217,7 +217,9 @@ curl -s -X PUT -H 'x-orchestrator-request: 1' -H 'content-type: application/json
 
 Setup uses the DeepSeek Harness subprocess service, as worker shells do. It removes environment variables whose names contain KEY, PASSWORD, SECRET or TOKEN.
 
-Setup verifies the GitHub repository and the agent's push access, writes the worker environment, and checks that git uses only the agent credentials for github.com. A Feishu setup failure disables only the Feishu Source.
+Setup verifies the GitHub repository and the agent's push access, writes the worker environment, and checks that git uses only the agent credentials for github.com. GitHub is the only repository host this version binds; the checks and git access below are its. A Feishu setup failure disables only the Feishu Source.
+
+Setup stores nothing: it resolves the repository, the accounts and the git access again on every start. A version that changes them needs no database migration, and rolling it back needs none either.
 
 The process environment that setup writes:
 
