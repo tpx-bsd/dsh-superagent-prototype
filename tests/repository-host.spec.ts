@@ -46,5 +46,5 @@ it('asks the host for the end notices of a Ticket that ended', async () => {
   const { ticket, sessionId } = await h.acceptedTicket(feishu('1', '@bot fix the login'))
   await h.runTool(sessionId, 'orchestrator_report', { state: 'dropped', summary: 'Already fixed upstream.' })
   expect(repository.pullEndNotices).toHaveBeenCalledWith(expect.objectContaining({ id: ticket.id, ended: expect.anything() }),
-    expect.stringContaining('fix the login'), 'acme/widgets')
+    expect.stringContaining('fix the login'), expect.objectContaining({ repository: 'acme/widgets' }))
 })

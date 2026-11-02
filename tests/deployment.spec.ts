@@ -54,7 +54,9 @@ describe('configuration schema', () => {
     // Limits are volatile references that the loader updates in place and callers read when used.
     expect({ ...read, promptMaxChars: read.promptMaxChars.get(), admissionContextMaxPages: read.admissionContextMaxPages.get(),
       admissionContextTimeoutMs: read.admissionContextTimeoutMs.get() })
-      .toEqual({ stateDir: join(dir, 'state'), promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000 })
+      .toEqual({ stateDir: join(dir, 'state'), repositoryHost: 'github', promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000 })
+    expect(machineOf(Config({ stateDir: join(dir, 'state'), repositoryHost: 'gitea' })).repositoryHost).toBe('gitea')
+    expect(() => Config({ stateDir: join(dir, 'state'), repositoryHost: 'gitlab' as 'gitea' })).toThrow()
     expect(() => Config(minimal({ stateDir: 'relative/dir' }))).toThrow()
     expect(() => Config(minimal({ stateDir: '~/dir' }))).toThrow()
   })
@@ -67,7 +69,7 @@ describe('configuration schema', () => {
 describe('setup', () => {
   it('reads the repository from the GitHub Source and the accounts from their CLIs, skipping the worker shims', async () => {
     const cli = join(dir, 'bin', 'gh')
-    expect(await githubHost.resolve(machine(), { repository: 'acme/widgets', cli: 'gh' }, probe, path)).toEqual({ repository: 'acme/widgets',
+    expect(await githubHost.resolve(machine(), { repository: 'acme/widgets', cli: 'gh' }, probe, path)).toEqual({ host: 'github', repository: 'acme/widgets',
       account: { command: 'gh', cli, login: 'Agent-Bot', commitEmail: '7+Agent-Bot@users.noreply.github.com' },
       git: { origin: 'https://github.com', helper: credentialHelper(cli), insteadOf: ['git@github.com:', 'ssh://git@github.com/'] } })
     // A renamed repository is still resolved by its old name; notifications carry GitHub's current full_name.
@@ -109,7 +111,7 @@ describe('setup', () => {
 })
 
 describe('Setup on a stand-in repository host', () => {
-  const access = { repository: 'acme/widgets', account: { command: 'repo-cli', cli: '/bin/echo', login: 'stand-in', commitEmail: 'stand-in@example.test' },
+  const access = { host: 'github' as const, repository: 'acme/widgets', account: { command: 'repo-cli', cli: '/bin/echo', login: 'stand-in', commitEmail: 'stand-in@example.test' },
     git: { origin: 'https://git.example.test', helper: '!stand-in-helper', insteadOf: ['ssh://git@git.example.test/'] } }
   const stubHost = (failure?: Error) => ({ source: { kind: 'github', health: ['github'] },
     resolve: vi.fn<RepositoryHost['resolve']>(async () => { if (failure) throw failure; return access }) })

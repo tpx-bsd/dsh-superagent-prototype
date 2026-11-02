@@ -10,9 +10,13 @@ import { SetupError } from './setup.ts'
 
 export const reason = (error: unknown): string => error instanceof Error ? error.message : String(error)
 const absolute = (description: string) => s.string().pattern(/^\//).description(`${description} Absolute path.`)
+export const REPOSITORY_HOSTS = ['github', 'gitea'] as const
+export type RepositoryHostKind = typeof REPOSITORY_HOSTS[number]
 /** Plugin configuration of the dsh-superagent entry. Volatile fields apply without a restart because dsh-superagent reads them on each use; changing `stateDir` remounts the plugin. */
 export const Config = s.object({
   stateDir: absolute('Directory for the database, locks, worker shims, the agent\'s git configuration and, by default, the ticket directories.').required(),
+  repositoryHost: s.union(REPOSITORY_HOSTS).default('github')
+    .description('Where the repository the agent works on lives: github, or gitea for the repository the Gitea Source names.'),
   promptMaxChars: s.number().min(LIMITS.promptMaxChars.min).max(LIMITS.promptMaxChars.max).step(1).default(100000)
     .description('Largest saved prompt configuration, in characters.').volatile(),
   admissionContextMaxPages: s.number().min(LIMITS.admissionContextMaxPages.min).max(LIMITS.admissionContextMaxPages.max).step(1).default(10)
@@ -23,6 +27,7 @@ export const Config = s.object({
 export type DeploymentConfig = ReturnType<typeof Config>
 export interface Machine {
   stateDir: string
+  repositoryHost: RepositoryHostKind
   promptMaxChars: Volatile<number>
   admissionContextMaxPages: Volatile<number>
   admissionContextTimeoutMs: Volatile<number>
@@ -37,27 +42,41 @@ const MOVED: Record<string, string> = {
 export function machineOf(config: DeploymentConfig): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
   if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; docs/006-deployment.md lists the keys`)
-  const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs } = config
-  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs }
+  const { stateDir, repositoryHost, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs } = config
+  return { stateDir, repositoryHost, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs }
 }
 
 export const GithubAccountsSchema = z.object({
   repository: z.string().trim().regex(/^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?$/, 'owner/name').default(''),
   cli: z.string().trim().default(''),
 })
+export const GiteaAccountsSchema = z.object({
+  url: z.string().trim().default(''),
+  repository: z.string().trim().regex(/^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?$/, 'owner/name').default(''),
+  tokenFile: z.string().trim().regex(/^(\/.*)?$/, 'an absolute path').default(''),
+  commitEmail: z.string().trim().regex(/^([^\s@]+@[^\s@]+)?$/, 'an email address').default(''),
+})
 export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
 /** Source configuration keys that affect deployment setup and trigger a restart when changed. */
-export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = { github: Object.keys(GithubAccountsSchema.shape), feishu: Object.keys(FeishuBotSchema.shape) }
+export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = { github: Object.keys(GithubAccountsSchema.shape),
+  gitea: Object.keys(GiteaAccountsSchema.shape), feishu: Object.keys(FeishuBotSchema.shape) }
 
-/** The agent's account on the repository host. Workers run its `cli` as `command`, and commit as `commitEmail`. */
-export interface Account { command: string; cli: string; login: string; commitEmail: string }
+/**
+ * The agent's account on the repository host, which commits as `commitEmail`: a GitHub account workers run as `command`, its
+ * `cli`, or a Gitea account on `server` whose token only the host and the git credential helper read from `tokenFile`.
+ */
+export type Account = { login: string; commitEmail: string } & ({ command: string; cli: string } | { server: string; tokenFile: string })
 /**
  * How the agent's git reaches the repository host. Setup writes it into the worker git configuration and checks that git reads it:
- * `helper` answers credentials for `origin`, and addresses starting with an `insteadOf` prefix are rewritten to `origin/`.
+ * `helper` answers credentials for `scope`, the URL of one repository whose path git then passes to it, or else for all of
+ * `origin`; addresses starting with an `insteadOf` prefix are rewritten to `origin/`.
  */
-export interface GitAccess { origin: string; helper: string; insteadOf: readonly string[] }
-/** What a repository host resolves at setup: the canonical `owner/name`, the agent's account and its git access. Rebuilt on every start, never stored. */
-export interface RepositoryAccess { repository: string; account: Account; git: GitAccess }
+export interface GitAccess { origin: string; helper: string; insteadOf: readonly string[]; scope?: string }
+/**
+ * What a repository host resolves at setup: which host, the canonical `owner/name`, the agent's account and its git access, and
+ * the host's version when it reports one. Rebuilt on every start, never stored.
+ */
+export interface RepositoryAccess { host: RepositoryHostKind; repository: string; account: Account; git: GitAccess; version?: string }
 export interface Deployment extends Machine, RepositoryAccess { feishu?: FeishuBot }
 export interface FeishuBot { cli: string; appId: string; brand: 'feishu' | 'lark'; botId: string; name: string }
 

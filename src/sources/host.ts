@@ -6,6 +6,10 @@ import type { SourceRegistry } from './registry.ts'
 import type { SetupProblem } from '../setup.ts'
 import type { Family, Key } from '../kv.ts'
 import { fill } from '../infra/text.ts'
+import type { PullState } from './pull.ts'
+
+/** What a worker asks a pull request to be opened with: its pushed `branch`, its title and its description. */
+export interface PullDraft { branch: string; title: string; body: string }
 
 /** Fixed English health templates (`{name}` placeholders); the panel localizes each `code` in the interface language. */
 export const HEALTH_TEXT = {
@@ -14,6 +18,7 @@ export const HEALTH_TEXT = {
   feishuCliUnset: 'The Source is on, and its bot lark-cli is not set',
   feishuBotMissing: 'Waiting for the Feishu bot',
   pollFailures: '{count} consecutive failed polls; last: {error}',
+  notBound: 'Inactive: this installation\'s repository is on {host}',
 } as const
 export type HealthCode = keyof typeof HEALTH_TEXT
 export type Health = { state: 'starting' | 'ready' | 'paused' | 'error'; detail: string; at?: string; code?: HealthCode; values?: Record<string, string> }
@@ -38,6 +43,8 @@ export interface SourceContext {
   readonly problem?: SetupProblem | undefined
   /** Returns a Source's configuration while enabled, or undefined while disabled or uninstalled. */
   config<C extends Record<string, unknown>>(kind: string): C | undefined
+  /** The Source's part of the current Policy, such as its `bots`, or undefined for a kind without one. */
+  policy(kind: string): Record<string, unknown> | undefined
   /** Ingests a trigger into the Engine and schedules the next evaluation pass; callers should await completion before advancing read cursors. */
   receive(trigger: Trigger): ReceiveResult | Promise<ReceiveResult>
   atomic<T>(work: () => T): T
@@ -82,6 +89,11 @@ export interface RepositoryHost {
    * binds the pull request to the Ticket and answers nothing, or answers why it does not belong to the Ticket.
    */
   pullClaim(ctx: SourceContext, ticketId: string, number: number, signal?: AbortSignal): Promise<() => string | undefined>
+  /**
+   * Finds the agent's pull request from `branch` to the default branch that this Ticket opened, in any state, or opens it, and
+   * returns it with the claim `pullClaim` returns. Only a host whose workers have no client of their own opens pull requests.
+   */
+  openPull?(ctx: SourceContext, ticketId: string, draft: PullDraft, signal?: AbortSignal): Promise<{ pull: PullState; claim: () => string | undefined }>
   /** The chat notices of a Ticket that ended with its pull request merged or closed. */
-  pullEndNotices(ticket: Ticket, request: string, repository: string): OutboundMessage[]
+  pullEndNotices(ticket: Ticket, request: string, deployment: Pick<Deployment, 'repository' | 'account'>): OutboundMessage[]
 }
