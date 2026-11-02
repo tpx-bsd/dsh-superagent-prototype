@@ -428,6 +428,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the pull request rules, health |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
 | `tests/gitea.spec.ts` | The application on the simulated host bound to a stand-in Gitea: setup and its problems, the scoped git credentials, pull requests a worker opens through `orchestrator_report`, adopted after a race, a lost answer or a person's close; the Source's polls, with who counts as a person, repeated and interrupted polls, a reply whose answer was lost, a restart with a follow-up and a waiting reply, merges and closes, reads and variables |
+| `tests/gitea-live.spec.ts` | Opt-in, with `DSH_SUPERAGENT_GITEA_LIVE`: the whole flow against a real, controlled Gitea server with real git, the test making the people's, the main Session's and the worker's calls, and the evidence it writes |
 | `tests/gitea-api.spec.ts` | `GiteaApi` against a stand-in server: paging that ignores limits or pages, errors without bodies, no redirect, the private token file, and the credential helper's exact repository scope |
 | `tests/feishu-read.spec.ts`, `tests/github-read.spec.ts` | Feishu and GitHub reads |
 | `tests/admission-context.spec.ts`, `tests/feishu-image.spec.ts` | The Thread window of assessments, and Feishu image reads |
