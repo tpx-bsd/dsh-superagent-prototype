@@ -1,91 +1,146 @@
 {
-  "at": "2026-11-02T10:34:13.030Z",
-  "server": "http://127.0.0.1:63847",
-  "repository": "pilot-owner/issue-3-final",
-  "setup": {
-    "host": "gitea",
-    "version": "28.3.0",
-    "repository": "pilot-owner/issue-3-final",
-    "account": "pilot-agent",
-    "gitScope": "http://127.0.0.1:63847/pilot-owner/issue-3-final.git",
-    "helperIsBundled": true
+  "result": "PASS",
+  "at": "2026-11-02T11:03:48.373Z",
+  "testedCommit": "772f6af2590903671f6b5777ff89f2b11b011eef",
+  "basedOnIssue2": "bf3c2a16703b8671aaf67eabff81d6f9bc441e82",
+  "method": "Controlled Gitea HTTP and Git with deterministic fixture DSH agents. No model. Production credential helper built by pnpm check before live scenario.",
+  "runtime": {
+    "node": "v24.19.0",
+    "pnpm": "11.7.0",
+    "gitea": "28.3.0",
+    "vitest": "4.1.8"
   },
-  "intake": [
-    {
-      "actor": "pilot-owner",
-      "human": true,
-      "verdict": "explicit"
-    },
-    {
-      "actor": "pilot-stranger",
-      "human": true,
-      "verdict": "not_a_member"
-    }
-  ],
-  "duplicatePoll": {
-    "replayed": [
-      "duplicate",
-      "duplicate"
-    ],
-    "tickets": 1
-  },
-  "pullRequest": {
-    "pushedBranch": "agent/greeting-915d99c5080d",
-    "number": 2,
-    "adoptedOnRepeat": true,
-    "follows": [
-      {
-        "thread": "gitea:869692358ead:2",
-        "own": true
-      }
-    ]
-  },
-  "restart": {
-    "cursorKeptAcrossRestart": true,
-    "cursorMovedSinceStart": true,
-    "followUpReachedTicket": true,
-    "tickets": 1
-  },
-  "replies": {
-    "inOriginalConversation": [
-      "On it: changing the greeting.",
-      "Should the greeting say hello or hi?",
-      "Done: the greeting says hello; the PR waits for review."
-    ],
-    "resentWithoutDuplicate": true
-  },
-  "terminal": {
-    "merged": {
-      "pull": 2,
-      "ticket": "merged"
-    },
-    "closed": {
-      "pull": 4,
-      "ticket": "closed"
-    },
-    "agentPullsOfThisRun": [
-      {
-        "number": 4,
-        "state": "closed",
-        "merged": false,
-        "author": "pilot-agent"
-      },
-      {
-        "number": 2,
-        "state": "closed",
-        "merged": true,
-        "author": "pilot-agent"
-      }
-    ]
-  },
-  "testedCommit": "a38f26f64c857303cef8966320bd01dd9b8c5759",
-  "method": "Real Gitea HTTP and Git with deterministic simulated DSH agents; no model call.",
   "configuration": {
     "repositoryHost": "gitea",
+    "server": "http://127.0.0.1:63847",
+    "repository": "pilot-owner/issue-3-final-r1",
+    "allowed": [
+      "pilot-owner"
+    ],
+    "unlistedRequester": "pilot-stranger",
     "agentAccountType": "Bot",
-    "tokenStorage": "owner-only file, path and contents omitted",
+    "tokenStorage": "owner-only private file; path and contents omitted",
     "githubConfigured": false,
     "feishuConfigured": false
   },
-  "internalServer": "Not checked. Follow-up issue 6."
+  "check": {
+    "typecheck": "PASS",
+    "testFiles": 62,
+    "tests": 1242,
+    "skippedFiles": 1,
+    "build": "PASS"
+  },
+  "live": {
+    "at": "2026-11-02T11:01:36.981Z",
+    "server": "http://127.0.0.1:63847",
+    "repository": "pilot-owner/issue-3-final-r1",
+    "setup": {
+      "host": "gitea",
+      "version": "28.3.0",
+      "repository": "pilot-owner/issue-3-final-r1",
+      "account": "pilot-agent",
+      "gitScope": "http://127.0.0.1:63847/pilot-owner/issue-3-final-r1.git",
+      "helperIsBundled": true
+    },
+    "intake": [
+      {
+        "actor": "pilot-stranger",
+        "human": true,
+        "verdict": "not_a_member"
+      },
+      {
+        "actor": "pilot-owner",
+        "human": true,
+        "verdict": "explicit"
+      }
+    ],
+    "duplicatePoll": {
+      "replayed": [
+        "duplicate",
+        "duplicate"
+      ],
+      "tickets": 1
+    },
+    "pullRequest": {
+      "pushedBranch": "agent/greeting-6f16399b3909",
+      "number": 2,
+      "adoptedOnRepeat": true,
+      "follows": [
+        {
+          "thread": "gitea:813eec2634e7:2",
+          "own": true
+        }
+      ]
+    },
+    "restart": {
+      "cursorKeptAcrossRestart": true,
+      "cursorMovedSinceStart": true,
+      "followUpReachedTicket": true,
+      "tickets": 1
+    },
+    "replies": {
+      "inOriginalConversation": [
+        "On it: changing the greeting.",
+        "Should the greeting say hello or hi?",
+        "Done: the greeting says hello; the PR waits for review."
+      ],
+      "resentWithoutDuplicate": true
+    },
+    "terminal": {
+      "merged": {
+        "pull": 2,
+        "ticket": "merged"
+      },
+      "closed": {
+        "pull": 4,
+        "ticket": "closed"
+      },
+      "agentPullsOfThisRun": [
+        {
+          "number": 4,
+          "state": "closed",
+          "merged": false,
+          "author": "pilot-agent"
+        },
+        {
+          "number": 2,
+          "state": "closed",
+          "merged": true,
+          "author": "pilot-agent"
+        }
+      ]
+    }
+  },
+  "terminalNotices": [
+    {
+      "outcome": "merged",
+      "originatingIssue": 1,
+      "pull": 2,
+      "matchingNoticeCount": 1,
+      "terminalNoticeCountOnPull": 0
+    },
+    {
+      "outcome": "closed",
+      "originatingIssue": 3,
+      "pull": 4,
+      "matchingNoticeCount": 1,
+      "terminalNoticeCountOnPull": 0
+    }
+  ],
+  "actualDsh": {
+    "version": "0.2.1-rc.3",
+    "method": "Fresh isolated real profile and browser settings inspection; processing paused, no model call. Restarted against tested application commit.",
+    "setup": "pass",
+    "health": "all ready",
+    "account": "pilot-agent",
+    "githubAccountConfigured": false,
+    "credentialContentsInManagementApi": false,
+    "serviceStatusExitCode": 0
+  },
+  "limits": [
+    "Only controlled Gitea 28.3.0 was checked. Internal server compatibility remains issue 6.",
+    "No live GitHub repository was mutated. Existing support is covered by regression tests.",
+    "The deterministic end-to-end scenario uses fixture DSH agents, not model-driven work.",
+    "Independent-family review is blocked because the Claude provider is out of credits."
+  ]
 }

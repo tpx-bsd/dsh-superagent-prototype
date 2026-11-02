@@ -288,7 +288,7 @@ From an allowed account on the selected host, open an Issue or post a comment co
 
 ## Gitea version and API limits
 
-Setup reads the server version and shows it on the Gitea Source card. The controlled HTTP and Git scenario has passed on Gitea **28.3.0**. Other versions display **an untested version**; passing setup alone does not establish compatibility. Internal-server validation remains deferred to issue #6.
+Setup reads the server version and shows it on the Gitea Source card. The [recorded controlled HTTP and Git scenario](gitea-verification.json) has passed on Gitea **28.3.0**. Other versions display **an untested version**; passing setup alone does not establish compatibility. Internal-server validation remains deferred to issue #6.
 
 The implementation covers Issue and PR descriptions, conversation comments, repository files, PR creation and adoption, and PR merge or close observation. It does not receive inline review comments, approvals, CI, notifications, or webhooks. It supplies no merge operation, multi-repository support, or GitHub-shaped Gitea CLI.
 
