@@ -97,6 +97,6 @@ export const giteaHost: RepositoryHost = {
   },
   pullEndNotices(ticket, request, deployment) {
     const connection = giteaConnection(deployment)
-    return pullEndNotices(giteaThreads(connection), number => `${connection.server}/${connection.repository}/pulls/${number}`, ticket, request)
+    return pullEndNotices(giteaThreads(connection), number => `${connection.server}/${connection.repository}/pulls/${number}`, ticket, request, true)
   },
 }

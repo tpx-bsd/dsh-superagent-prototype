@@ -96,11 +96,11 @@ function closePull(ctx: SourceContext, threads: PullThreads, pr: PullState): voi
   ctx.tickets.threadClosed(threadOf(threads, pr.number), pr.state === 'merged' ? 'merged' : 'closed', pr.endedAt ?? new Date().toISOString())
 }
 /**
- * Builds idempotent outbound notices for IM conversations when a ticket ends with its PR (selecting the last-closed PR it
+ * Builds idempotent outbound notices for conversations when a ticket ends with its PR (selecting the last-closed PR it
  * opened, else the last one it followed). The notice language follows the ticket's source request: Chinese when it contains
- * Han characters and no kana, otherwise English. The host's own conversations already show the outcome, so they are skipped.
+ * Han characters and no kana, otherwise English. Hosts may include other conversations on the same Source, excluding the terminal PR.
  */
-export function pullEndNotices(threads: PullThreads, page: (number: number) => string, ticket: Ticket, request: string): OutboundMessage[] {
+export function pullEndNotices(threads: PullThreads, page: (number: number) => string, ticket: Ticket, request: string, otherThreads = false): OutboundMessage[] {
   const outcome = ticket.ended?.outcome
   const follows = (ticket.follows ?? []).filter(item => item.closed && numberOf(threads, item.thread) !== undefined)
   const latest = (items: Follow[]) => items.sort((a, b) => b.closed!.at.localeCompare(a.closed!.at))[0]
@@ -112,6 +112,6 @@ export function pullEndNotices(threads: PullThreads, page: (number: number) => s
   const text = chinese
     ? outcome === 'merged' ? `[PR #${number}](${url}) 已合并。` : `[PR #${number}](${url}) 已关闭，未合并。`
     : outcome === 'merged' ? `[PR #${number}](${url}) has merged.` : `[PR #${number}](${url}) was closed without merging.`
-  return ticket.channels.filter(channel => channel.source !== threads.source).map(channel => ({
+  return ticket.channels.filter(channel => channel.source !== threads.source || (otherThreads && channel.thread !== follow.thread)).map(channel => ({
     id: key('pr-terminal', String(number), channel.source, JSON.stringify(channel.address), outcome), channel, text, kind: 'notice', ticketId: ticket.id }))
 }
