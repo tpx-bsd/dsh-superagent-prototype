@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { liveTicket, type EngineForExecutor, type Ticket } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import type { Deployment } from '../../deployment.ts'
-import type { RepositoryHost } from '../../sources/host.ts'
+import type { PullDraft, RepositoryHost } from '../../sources/host.ts'
 import { readResource, type ResourceHost } from '../resources.ts'
 import type { Store } from '../store.ts'
 import { reportRelay, threadFollowedNotice } from '../notices.ts'
@@ -17,11 +17,30 @@ export interface ExecutorToolsHost {
   readonly resources: ResourceHost
   readonly deployment: Pick<Deployment, 'account'>
   pullClaim(ticketId: string, number: number, signal?: AbortSignal): ReturnType<RepositoryHost['pullClaim']>
+  /** Present when the repository host opens workers' pull requests itself. */
+  openPull?(ticketId: string, draft: PullDraft, signal?: AbortSignal): ReturnType<NonNullable<RepositoryHost['openPull']>>
   sendReplies(): Promise<void>
 }
 
+const PullDraftSchema = z.object({
+  branch: z.string().trim().min(1).describe('The branch you pushed, whose last path segment is DSH_SUPERAGENT_NAME, such as agent/<name>.'),
+  title: z.string().trim().min(1).max(255),
+  body: z.string().describe('The description: what changed, why, and how it was verified.'),
+}).strict()
+
 export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
   const ticketId = ticket.id
+  const ReportSchema = z.object({
+    state: z.enum(['progress', 'ready', 'blocked', 'failed', 'dropped']),
+    summary: z.string().min(1),
+    human_action: z.string().trim().min(1).max(1000).nullish().describe('One concrete question for a person, also with state=progress; omit to keep the pending one, null to clear it.'),
+    question_for_trigger_id: z.string().optional().describe('With human_action: the human message that raised the question, which is asked where that person wrote.'),
+    pr_number: z.number().int().positive().nullish().describe(`The ticket's PR: its source PR, or one by ${host.deployment.account.login} from a branch named after this ticket (DSH_SUPERAGENT_NAME).`),
+    reply_to_trigger_id: z.string().optional().describe('The explicit human question this report answers; never for ordinary progress.'),
+  }).strict()
+  const report = host.openPull ? ReportSchema.extend({ pr_open: PullDraftSchema.optional().describe('Instead of pr_number: open the ticket\'s PR from the branch you pushed '
+    + 'to the default branch, or find the one this ticket already opened from it, in any state, and bind it; the result names it. A closed one stays closed: '
+    + 'open another from a new branch whose last path segment is DSH_SUPERAGENT_NAME.') }) : ReportSchema
   return [
     readTool('Read one page of a resource of this ticket that the resource parameter lists. Follow next_offset, and next_resource where a page names one.',
       true, (resource, offset, limit, signal) => readResource(host.resources, resource, offset, limit, ticketId, signal)),
@@ -74,18 +93,14 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
     tool({
       name: 'orchestrator_report',
       description: 'Report progress, ready, blocked, failed or dropped, as the work and handoff sections say.',
-      schema: z.object({
-        state: z.enum(['progress', 'ready', 'blocked', 'failed', 'dropped']),
-        summary: z.string().min(1),
-        human_action: z.string().trim().min(1).max(1000).nullish().describe('One concrete question for a person, also with state=progress; omit to keep the pending one, null to clear it.'),
-        question_for_trigger_id: z.string().optional().describe('With human_action: the human message that raised the question, which is asked where that person wrote.'),
-        pr_number: z.number().int().positive().nullish().describe(`The ticket's PR: its source PR, or one by ${host.deployment.account.login} from a branch named after this ticket (DSH_SUPERAGENT_NAME).`),
-        reply_to_trigger_id: z.string().optional().describe('The explicit human question this report answers; never for ordinary progress.'),
-      }).strict(),
-      execute: async (args, signal) => {
+      schema: report,
+      execute: async (args: z.infer<typeof ReportSchema> & { pr_open?: PullDraft }, signal) => {
         const current = host.store.tickets.get(ticketId)
         if (!current || !liveTicket(current)) throw new Error('Ticket ended (PR was closed or work finished); do not resume it')
-        const claim = args.pr_number != null ? await host.pullClaim(ticketId, args.pr_number, signal) : undefined
+        const draft = args.pr_open
+        if (draft && args.pr_number != null) throw new Error('Give pr_open or pr_number, not both')
+        const opened = draft ? await host.openPull!(ticketId, draft, signal) : undefined
+        const claim = opened?.claim ?? (args.pr_number != null ? await host.pullClaim(ticketId, args.pr_number, signal) : undefined)
         // Claim the PR, record the report, and queue the relay atomically so a rejected PR claim or invalid report leaves no partial state, and a recorded report always reaches the main Session.
         return host.store.atomic(() => {
           const refused = claim?.()
@@ -94,10 +109,11 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
             ...(args.question_for_trigger_id ? { askedBy: args.question_for_trigger_id } : {}),
             ...(args.reply_to_trigger_id ? { answers: args.reply_to_trigger_id } : {}) }
           const updated = host.engine.report(ticketId, report)
-          const relay = reportRelay(updated, report)
+          const relay = reportRelay(updated, report, host.resources.humanInput)
           if (relay) host.sessions.relay(relay.id, relay.text)
           const notification = relay ? 'orchestrator' : 'internal_only'
-          return { reported: true, notification, ...(updated.attention ? { attention: updated.attention } : {}) }
+          return { reported: true, notification, ...(updated.attention ? { attention: updated.attention } : {}),
+            ...opened ? { pr: { number: opened.pull.number, url: opened.pull.url, state: opened.pull.state } } : {} }
         })
       },
     }),

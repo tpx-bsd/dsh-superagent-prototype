@@ -1,7 +1,7 @@
 /** Shared base class and configuration for Engine domain parts. */
 import { UserError } from './errors.ts'
-import { followupOwners, reached, threadKey } from './model.ts'
-import type { Thread, ThreadRef, Ticket, Trigger } from './model.ts'
+import { currentHuman, followupOwners, inputAuthority, reached, threadKey, waitsForPerson } from './model.ts'
+import type { Thread, ThreadRef, Ticket, TicketInput, Trigger } from './model.ts'
 import type { Assessor, AssessmentOutcome, DomainEvent, DomainEvents, Executor, Outbox, Policy, Repositories, SourceScope } from './ports.ts'
 
 export interface EngineOptions {
@@ -27,7 +27,15 @@ export abstract class EnginePart {
   protected now(): string { return this.options.now?.() ?? new Date().toISOString() }
   protected policy(): Policy { return this.options.policy() }
   /** The tickets whose worker decides a person's follow-up: see `followupOwners`. */
-  protected owners(trigger: Trigger): string[] { return followupOwners(trigger, this.repo) }
+  protected owners(trigger: Trigger): string[] { return followupOwners(trigger, this.repo, this.options.scope) }
+  protected human(trigger: Trigger | undefined): boolean { return !!trigger && currentHuman(trigger, this.options.scope) }
+  protected humanInput(input: TicketInput | undefined): boolean {
+    return input?.kind === 'trigger' && inputAuthority(this.repo.triggers, this.options.scope)(input)
+  }
+  protected automatic(input: TicketInput | undefined): boolean {
+    return input?.kind === 'note' || (input?.kind === 'trigger' && !this.humanInput(input))
+  }
+  protected waitsForPerson(ticket: Ticket): boolean { return waitsForPerson(ticket, input => this.humanInput(input)) }
   /** Refuse a main-Session routing of a follow-up a ticket's worker still decides. */
   protected leftToWorkers(trigger: Trigger): void {
     const owners = this.owners(trigger)

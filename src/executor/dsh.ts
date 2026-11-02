@@ -4,8 +4,8 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { mkdir, rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
-import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
+import { inputAuthority, key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
+import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, SourceScope, Ticket, TicketInput, Trigger }
   from '../core/index.ts'
 import type { Machine } from '../deployment.ts'
 import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
@@ -34,8 +34,6 @@ const BACKGROUND_LIMIT_MS = 30 * 60_000
 const SHUTDOWN_STOP_MS = 10_000
 /** How long a worker that goes on after a passing failure waits for a worker slot, or for processing to resume, between looks. */
 const SLOT_WAIT_MS = 5000
-/** True when an input comes from a person (a non-context human trigger or a direct text input such as a status request). */
-const fromPerson = (input?: TicketInput): boolean => input?.kind === 'trigger' ? !!input.human && !input.context : input?.kind === 'text'
 /**
  * Internal error thrown when a ticket's workspace prepare command fails during launch.
  * DshExecutor catches it to mark the ticket failed immediately rather than retrying automatically, because an existing directory counts as prepared and an automatic retry would treat whatever a failed prepare command left behind in the directory as a prepared workspace.
@@ -63,6 +61,7 @@ export interface ExecutorHost {
   readonly engine: Pick<EngineForExecutor, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed' | 'report'
     | 'assignmentInterrupted'>
   readonly store: Pick<Store, 'tickets' | 'triggers' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
+  readonly sources: SourceScope
   /** Durable effect queue through which launches and input deliveries run. */
   readonly effects: Pick<Effects, 'enqueue' | 'handle'>
   /** The `worker` health entry, which reports whether background worker event handling failed. */
@@ -266,6 +265,13 @@ export class DshExecutor implements Executor {
   }
   /** Enqueues a `delivery` effect to steer pending inputs into `ticket`'s running worker session. */
   deliver(ticket: Ticket, _assignment: Assignment): void { this.host.effects.enqueue('delivery', ticket.id, { ticketId: ticket.id }) }
+  private humanInput(input: TicketInput | undefined): boolean {
+    return input?.kind === 'trigger' && inputAuthority(this.host.store.triggers, this.host.sources)(input)
+  }
+  private fromPerson(input: TicketInput | undefined): boolean {
+    return input?.kind === 'trigger' ? this.humanInput(input) && !input.context : input?.kind === 'text'
+  }
+  private waitsForPerson(ticket: Ticket): boolean { return waitsForPerson(ticket, input => this.humanInput(input)) }
   /** Launches a queued assignment unless its ticket ended or a newer assignment replaced it meanwhile. */
   private async launchQueued({ ticketId, assignmentId }: { ticketId: string; assignmentId: string }): Promise<void> {
     const ticket = this.host.store.tickets.get(ticketId)
@@ -300,15 +306,16 @@ export class DshExecutor implements Executor {
         const assignment = ticket && liveTicket(ticket) ? runningAssignment(ticket) : undefined
         const inputId = ticket?.undelivered[0]
         if (!ticket || !assignment || inputId === undefined) return
+        const input = ticket.inputs.find(item => item.id === inputId)
+        if (input?.kind === 'trigger' && this.waitsForPerson(ticket) && !this.humanInput(input)) throw new Later('The worker is waiting for a person')
         // Waking an idle worker reserves a slot (including the extra slot reserved for human follow-ups).
         const sessionId = workerSessionId(ticketId)
         if (!woken && !this.running(ticket)) {
           // A person's message wakes its worker ahead of new launches, in the slot kept for it.
-          const person = ticket.undelivered.some(id => fromPerson(ticket.inputs.find(item => item.id === id)))
+          const person = ticket.undelivered.some(id => this.fromPerson(ticket.inputs.find(item => item.id === id)))
           this.slots.reserve(ticketId, person ? 'person' : 'wake')
           woken = true
         }
-        const input = ticket.inputs.find(item => item.id === inputId)
         try {
           // Recreate the worker session if it was externally deleted.
           if (!this.host.context.agents.get(sessionId as SessionId)) {
@@ -327,10 +334,12 @@ export class DshExecutor implements Executor {
     } finally { if (woken) this.slots.free(ticketId) }
   }
   private async deliverInput(ticket: Ticket, assignment: Assignment, input: TicketInput): Promise<void> {
-    // Re-check right before session delivery because the ticket may have ended while awaiting `sourceLink`.
     const live = () => {
       const current = this.host.store.tickets.get(ticket.id)
       if (!current || !liveTicket(current) || runningAssignment(current)?.id !== assignment.id) throw new Error('The ticket ended or another Assignment took it over')
+      const pending = current.inputs.find(item => item.id === input.id)
+      if (!pending || !current.undelivered.includes(input.id)) throw new Later('The input no longer waits for delivery')
+      if (pending.kind === 'trigger' && this.waitsForPerson(current) && !this.humanInput(pending)) throw new Later('The worker is waiting for a person')
       // A stop of the worker's background work that started meanwhile ends with a cancel, which would drop the Input.
       if (this.stopping.has(ticket.id)) throw new Later('The worker\'s background work is stopping')
     }
@@ -417,7 +426,7 @@ export class DshExecutor implements Executor {
   private failed(ticketId: string, summary: string): void {
     this.host.store.atomic(() => {
       const updated = this.host.engine.report(ticketId, { state: 'failed', summary })
-      this.relay(resultRelay(updated, 'failed', summary))
+      this.relay(resultRelay(updated, inputAuthority(this.host.store.triggers, this.host.sources), 'failed', summary))
     })
   }
   private relay({ id, text }: { id: string; text: string }): void { this.host.sessions.relay(id, text) }
@@ -532,7 +541,7 @@ export class DshExecutor implements Executor {
         this.stopWork(ticket.id, 'dsh-superagent restarted', true)
         this.host.engine.assignmentInterrupted(ticket.id, running.id)
       }
-      else if (latest?.state === 'pending' && !waitsForPerson(ticket)) this.start(ticket, latest)
+      else if (latest?.state === 'pending' && !this.waitsForPerson(ticket)) this.start(ticket, latest)
     }
   }
   /** Runs background worker event handling and updates the `worker` health entry on failure or recovery. */
@@ -614,7 +623,7 @@ export class DshExecutor implements Executor {
     const handedOff = (stored: Ticket) => {
       const assignment = runningAssignment(stored), report = assignment?.report
       const since = !!assignment?.deliveredAt && !!report && assignment.deliveredAt >= report.at
-      return ((report?.state === 'ready' || !!stored.attention) && !since) || waitsForPerson(stored)
+      return ((report?.state === 'ready' || !!stored.attention) && !since) || this.waitsForPerson(stored)
     }
     const before = live()
     if (!before || this.host.closing()) return
@@ -664,9 +673,9 @@ export class DshExecutor implements Executor {
       const before = latestReport(current)?.summary ?? ''
       const updated = this.host.engine.report(ticket.id, { state: 'waiting', summary: said || before })
       // A quiet final after orchestrator_report is not a new status or an empty handoff.
-      if (said) this.relay(resultRelay(updated, 'waiting', said))
+      if (said) this.relay(resultRelay(updated, inputAuthority(this.host.store.triggers, this.host.sources), 'waiting', said))
       else if (!before.trim()) {
-        this.relay(resultRelay(updated, 'waiting', 'Worker ended without a status report. Use orchestrator_ticket_request_status to request one.'))
+        this.relay(resultRelay(updated, inputAuthority(this.host.store.triggers, this.host.sources), 'waiting', 'Worker ended without a status report. Use orchestrator_ticket_request_status to request one.'))
       }
     })
   }

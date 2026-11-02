@@ -122,12 +122,14 @@ it('follows the Ticket\'s stage: a blocked Ticket a person answered since is wor
       report: blocked }],
     inputs: [] as { id: string; kind: 'trigger'; triggerId: string; at: string; human?: true }[] }
   store.tickets.save(ticket)
-  const row = ticketSummary(store.tickets.get('t1')!)
+  const row = ticketSummary(store.tickets.get('t1')!, snapshot(host).humanInput)
   expect(row).toMatchObject({ stage: 'person', action: 'blocked', actions: { retry: true }, note: { text: 'Needs the design file',
     error: false } })
   expect(ticketDetail(host, 't1')!.assignments[0]).toMatchObject({ turnEndedAt: blocked.at })
+  store.triggers.save({ id: 'e2', source: 'feishu', actor: ticket.mandate.actor, human: true, at: '2026-09-22T00:02:00Z',
+    threads: [{ source: 'feishu', id: 't1' }], text: 'Here is the design file.', meta: {} })
   store.tickets.save({ ...ticket, inputs: [{ id: 'i1', kind: 'trigger', triggerId: 'e2', at: '2026-09-22T00:02:00Z', human: true }] })
-  const answered = ticketSummary(store.tickets.get('t1')!)
+  const answered = ticketSummary(store.tickets.get('t1')!, snapshot(host).humanInput)
   expect(answered).toMatchObject({ stage: 'working', actions: { retry: false } })
   expect(answered).not.toHaveProperty('note')
   expect(ticketDetail(host, 't1')!.assignments[0]).not.toHaveProperty('turnEndedAt')

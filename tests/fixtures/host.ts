@@ -3,6 +3,7 @@
  * allowed member Alice (`ou_alice`), listened chat `oc_team`, and `auto` eval mode. Stop it with `stop()`.
  */
 import { Context } from '@deepseek-ai/cordis'
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -19,6 +20,7 @@ import { credentialHelper } from '../../src/sources/github-host.ts'
 import type { RepositoryHost } from '../../src/sources/host.ts'
 import type { Trigger } from '../../src/core/index.ts'
 import { testMachine } from './deployment.ts'
+import { gitEnv } from './git.ts'
 
 export const MEMBER = 'ou_alice'
 export const CHAT = 'oc_team'
@@ -133,9 +135,11 @@ export function subagentRuntime(agents: Map<string, FakeAgent>) {
   return { service, settle, spawn, live: (id: string) => !!children.get(id)?.live }
 }
 
-/** @param seed - writes to the database before the Runtime opens it, such as records an earlier version stored. */
-export async function startRuntime(seed?: (store: Store) => void, repositoryHost?: RepositoryHost) {
-  const directory = mkdtempSync(join(tmpdir(), 'orchestrator-host-'))
+/**
+ * @param seed - writes to the database before the Runtime opens it, such as records an earlier version stored.
+ * @param directory - the state directory of a Runtime that ran before and stopped with `stop(true)`, which this one restarts on.
+ */
+export async function startRuntime(seed?: (store: Store) => void, repositoryHost?: RepositoryHost, directory = mkdtempSync(join(tmpdir(), 'orchestrator-host-'))) {
   const AGENT = join(directory, 'agent-gh'), BOT = join(directory, 'lark-bot')
   const repository = { default_branch: 'master', permissions: { push: true } }
   vi.spyOn(Commands.prototype, 'gh').mockImplementation(async args => args[1] === 'user' ? { login: 'agent-bot' } : repository)
@@ -160,7 +164,10 @@ export async function startRuntime(seed?: (store: Store) => void, repositoryHost
     const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
     const exited = { exitCode: 0, signal: null }
     const done = argv[0] === 'sh' && hooks.prepare ? hooks.prepare.then(() => exited) : Promise.resolve(exited)
-    return { done, collected: { stdout: reader(answers[argv.join(' ')] ?? ''), stderr: reader('') } }
+    const lookup = argv.slice(0, 5).join(' ') === 'git config -z --show-origin --get-all'
+      ? () => { try { return execFileSync('git', argv.slice(1), { env: gitEnv({ GIT_CONFIG_GLOBAL: workerGitConfig(directory), GIT_CONFIG_NOSYSTEM: '1' }), encoding: 'utf8' }) } catch { return '' } }
+      : () => ''
+    return { done, collected: { stdout: reader(answers[argv.join(' ')] ?? lookup()), stderr: reader('') } }
   }) }
   const agents = new Map<string, FakeAgent>()
   /** Each Session's next step, which takes the messages that wait for one. */
@@ -257,7 +264,7 @@ export async function startRuntime(seed?: (store: Store) => void, repositoryHost
   const settings = runtime.store.settings()
   runtime.store.saveSettings({ ...settings, eval: { ...settings.eval, mode: 'auto' },
     policy: { ...settings.policy, sources: { feishu: { allowed: [{ id: MEMBER, name: 'Alice' }], syncChat: CHAT }, github: { allowed: [{ id: 'alice' }] } } },
-    sources: { ...sources, feishu: { enabled: true, config: { cli: BOT, chats: [{ chatId: CHAT, listen: 'all' }], directMessages: true } } } })
+    sources: { ...settings.sources, feishu: { enabled: true, config: { cli: BOT, chats: [{ chatId: CHAT, listen: 'all' }], directMessages: true } } } })
   deliveries.mockClear()
 
   /** Parsed JSON payloads delivered to `sessionId`. */
@@ -290,7 +297,7 @@ export async function startRuntime(seed?: (store: Store) => void, repositoryHost
     await http(req, { writeHead: (code: number) => { status = code }, end: (data: string) => { text = data } })
     return { status, body: JSON.parse(text) as Record<string, unknown> }
   }
-  async function stop() { await runtime.stop(); vi.restoreAllMocks(); rmSync(directory, { recursive: true, force: true }) }
+  async function stop(keep = false) { await runtime.stop(); vi.restoreAllMocks(); if (!keep) rmSync(directory, { recursive: true, force: true }) }
   /** The Session's model takes its next step, which takes the messages steered in since its last. */
   const step = (sessionId: string) => { steps.get(sessionId)!() }
   /** A step of the worker claims what waits for it, and is cut off before the Session took it. */

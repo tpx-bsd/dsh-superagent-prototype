@@ -10,9 +10,9 @@ import { branchCiTrigger, ciTrigger, commentTrigger, CommentSchema, githubAddres
 import { githubLink, sendGithub } from './github-channel.ts'
 import type { GithubComment, PullRef } from './github-trigger.ts'
 import { observePull, pullsOf, readPull, type Pull } from './github-pull.ts'
-import { health, sourceContext, type Health, type SourceContext } from './host.ts'
+import { health, sourceContext, type SourceContext } from './host.ts'
 import { KV } from '../kv.ts'
-import { cursorAt, pause, POLL_HORIZON_MS, pollThreads as pollEach } from './poll.ts'
+import { cursorAt, pause, POLL_HORIZON_MS, pollFailure, pollThreads as pollEach } from './poll.ts'
 import type { Localized, SourceKind } from './kind.ts'
 import { z } from 'zod'
 
@@ -97,13 +97,14 @@ export const githubKind: SourceKind<GithubConfig> = {
       { key: 'DSH_SUPERAGENT_GITHUB_NUMBER', description: { zh: '接下工单的 Issue 或 PR 编号；工单不是从 GitHub 来的时为空', en: 'Number of the Issue or PR that started the ticket; empty when the ticket did not start on GitHub' } },
       { key: 'DSH_SUPERAGENT_GITHUB_PR_HEAD', description: { zh: '接下工单的 PR 的 head 引用 refs/pull/<编号>/head；不是 PR 时为空', en: 'Head ref refs/pull/<number>/head of the PR that started the ticket; empty when it was not a PR' } },
     ],
-    values: ({ deployment, trigger }) => {
+    values: ({ deployment, trigger }): Record<string, string> => {
+      if (deployment.host !== SOURCE) return {}
       const number = trigger?.threads[0]?.source === SOURCE ? Number(trigger.meta.number) || 0 : 0
       return { DSH_SUPERAGENT_GITHUB_REPOSITORY: deployment.repository, DSH_SUPERAGENT_GITHUB_ACCOUNT: deployment.account.login, DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL: deployment.account.commitEmail, DSH_SUPERAGENT_GITHUB_NUMBER: number ? String(number) : '',
         DSH_SUPERAGENT_GITHUB_PR_HEAD: number && trigger?.meta.isPr === true ? `refs/pull/${number}/head` : '' }
     },
   },
-  facts: (deployment): Record<string, Localized | string> => deployment ? {
+  facts: (deployment): Record<string, Localized | string> => deployment?.host === SOURCE ? {
     cli: { zh: `当前账号 @${deployment.account.login}`, en: `Current account @${deployment.account.login}` },
   } : {},
 }
@@ -120,16 +121,13 @@ export function apply(ctx: Context): void {
     return async () => { controller.abort(); await running }
   })
 }
-/** Returns an error health once `failures` consecutive polls fail, or undefined so a single network interruption stays quiet. */
-export function pollFailure(failures: number, threshold: number, error: unknown): Health | undefined {
-  return failures >= threshold ? health('error', 'pollFailures', { count: String(failures), error: String(error) }) : undefined
-}
 async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
   let interval = 60
   let failures = 0
   await ctx.ready
   // Setup restarts dsh-superagent once it resolves the accounts; until then nothing is polled.
   if (!ctx.configured()) { ctx.report('github', health('paused', 'setupPending')); return }
+  if (ctx.deployment.host !== SOURCE) { ctx.report('github', health('paused', 'notBound', { host: ctx.deployment.host })); return }
   while (!signal.aborted) {
     const config = ctx.config<GithubConfig>(SOURCE)
     try {

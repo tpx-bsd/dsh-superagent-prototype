@@ -135,7 +135,7 @@ it('shows a trigger and a ticket as cards with a short preview and references to
   const { policyVersion: _version, ...mandate } = ticket.mandate
   const threads = [{ thread: 'github:42', bound: true as const }]
   const batch = [{ ...trigger, id: 'request-2', text: 'Also the flaky one.' }]
-  expect(ticketDetails(ticket, threads, batch)).toEqual({ ticket_id: 'ticket-1', title: 'Inspect failing check',
+  expect(ticketDetails(ticket, input => !!input.human, threads, batch)).toEqual({ ticket_id: 'ticket-1', title: 'Inspect failing check',
     state: 'person/review', strength: 'explicit', pr_number: 42, read: 'ticket/ticket-1', trigger_id: 'request-1', decision_id: 'd1',
     batch: [{ trigger_id: 'request-2', from: 'alice', at: trigger.at, preview: 'Also the flaky one.', read: 'trigger/request-2' }],
     threads, directory: '/worktrees/ticket-1', scope: mandate.scope, requested_by: 'alice', inputs: { items: [] },
@@ -143,13 +143,13 @@ it('shows a trigger and a ticket as cards with a short preview and references to
       chars: SUMMARY.length, read: 'ticket/ticket-1/report/a1' } }] },
     assignment: 'ticket/ticket-1/assignment', result: 'ticket/ticket-1/result', transcript: 'ticket/ticket-1/transcript' })
   // Its worker reads no Decision, so it sees no Decision's id.
-  expect(ticketDetails({ ...ticket, inputs: [{ id: 'r', kind: 'reopen', decisionId: 'd2', at: '1' }] }, threads, [], true)).toMatchObject({
+  expect(ticketDetails({ ...ticket, inputs: [{ id: 'r', kind: 'reopen', decisionId: 'd2', at: '1' }] }, input => !!input.human, threads, [], true)).toMatchObject({
     inputs: { items: [{ kind: 'reopen', read: `ticket/ticket-1/input/${key('r')}` }] } })
-  expect(JSON.stringify(ticketDetails({ ...ticket, inputs: [{ id: 'r', kind: 'reopen', decisionId: 'd2', at: '1' }] }, threads, [], true))).not.toMatch(/"d[12]"/)
+  expect(JSON.stringify(ticketDetails({ ...ticket, inputs: [{ id: 'r', kind: 'reopen', decisionId: 'd2', at: '1' }] }, input => !!input.human, threads, [], true))).not.toMatch(/"d[12]"/)
   // The latest ten Inputs, newest first, each read by the name its line gives; the next page reads from the Inputs' own list.
   const inputs = Array.from({ length: 12 }, (_, n) => ({ id: `text:${n}`, kind: 'text' as const, text: `Note ${n}`, at: String(n) }))
   const page = ticketDetails({ ...ticket, inputs: [...inputs, { id: 'text:long', kind: 'text', text: 'Long note. '.repeat(10), at: '12' }], undelivered: ['text:11'] },
-    [], []).inputs
+    input => !!input.human, [], []).inputs
   // A short text is inline; a longer one shows a preview and reads through the Input's resource.
   expect([page.items.length, page.items[0], page.items[1], page.next_resource, page.next_offset]).toEqual([10, { kind: 'text', at: '12',
     preview: expect.stringMatching(/^Long note\./), chars: 110, read: `ticket/ticket-1/input/${key('text:long')}` },
@@ -164,12 +164,12 @@ it('shows a ticket card\'s state from a closed set: the open ticket\'s stage, th
     [{ ...ticket, ended: { at: 'e', by: 'human', reason: 'Not needed after all', outcome: 'stopped' } }, 'stopped'],
     [{ ...ticket, ended: { at: 'e', by: 'executor', reason: 'merged', outcome: 'merged' } }, 'merged'],
   ]
-  for (const [item, state] of cases) expect(ticketCard(item).state).toBe(state)
-  expect(cases.map(([item]) => ticketCard(item).state).every(state => (TICKET_STATES as readonly string[]).includes(state))).toBe(true)
-  expect(ticketCard(cases[8]![0])).toMatchObject({ ended: { at: 'e', by: 'human', reason: 'Not needed after all' } })
-  expect(ticketCard(ticket)).toMatchObject({ ticket_id: 'ticket-1', pr_number: 42, strength: 'explicit' })
-  expect(ticketCard(ticket)).not.toHaveProperty('attention')
-  expect(ticketCard({ ...ticket, attention: { id: 'q', question: 'Desktop too?' } })).toMatchObject({ attention: { question: 'Desktop too?' } })
+  for (const [item, state] of cases) expect(ticketCard(item, input => !!input.human).state).toBe(state)
+  expect(cases.map(([item]) => ticketCard(item, input => !!input.human).state).every(state => (TICKET_STATES as readonly string[]).includes(state))).toBe(true)
+  expect(ticketCard(cases[8]![0], input => !!input.human)).toMatchObject({ ended: { at: 'e', by: 'human', reason: 'Not needed after all' } })
+  expect(ticketCard(ticket, input => !!input.human)).toMatchObject({ ticket_id: 'ticket-1', pr_number: 42, strength: 'explicit' })
+  expect(ticketCard(ticket, input => !!input.human)).not.toHaveProperty('attention')
+  expect(ticketCard({ ...ticket, attention: { id: 'q', question: 'Desktop too?' } }, input => !!input.human)).toMatchObject({ attention: { question: 'Desktop too?' } })
 })
 it('shows a decision with snake_case keys and a reference to its details', () => {
   const decision: Decision = { id: 'd1', evalId: 'e1', threadKey: 'github:42', triggerIds: ['request-1'], policyVersion: 'v1', at: 'a', kind: 'accept', reason: [said('r')],

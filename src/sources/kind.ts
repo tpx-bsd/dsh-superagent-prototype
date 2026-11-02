@@ -1,7 +1,7 @@
 /** SourceKind plugin contract: configuration schema, UI form fields, policy integration, channel adapter, and thread context reader. */
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { z } from 'zod'
-import type { OutboundMessage, ScopeResult, Trigger } from '../core/index.ts'
+import type { ActorRef, OutboundMessage, ScopeResult, Trigger } from '../core/index.ts'
 import type { Deployment } from '../deployment.ts'
 import type { Commands } from '../infra/commands.ts'
 import type { SourceContext, SourceHost } from './host.ts'
@@ -28,6 +28,8 @@ export interface AdmissionRowView { id: string; label: Localized | string; note:
 export interface SourcePolicyPart<P extends Record<string, unknown>> {
   /** Validates the Source's part of the Policy, including `allowed` (senders who may originate work). */
   schema: z.ZodType<P>
+  /** Vetoes human authority under the current Source Policy without changing stored events. */
+  permitsHuman?(actor: ActorRef, part: P): boolean
   /** Form fields of the policy part; the first is `allowed`. */
   fields: FieldSpec[]
   /** Describes what the Source marks as addressed to the agent, which an allowed sender's explicit request requires. */
@@ -101,7 +103,7 @@ export interface SourceKind<C extends Record<string, unknown> = Record<string, u
   /** Bounded context reader for assessments; assessments of a kind without `threadContext` read none. */
   threadContext?: ThreadContext<C>
   /** Maps a search query to candidate Thread keys (such as `github:12`) and Trigger search terms (such as a Feishu `om_` ID). */
-  find?(query: string): { threads: string[]; terms: string[] }
+  find?(query: string, config: C): { threads: string[]; terms: string[] }
   /** Returns the ID of the Trigger whose message this Trigger replies to, when derivable without a network read. */
   repliesTo?(trigger: Trigger): string | undefined
   /** Policy section for kinds whose senders have their own identity. */

@@ -31,6 +31,7 @@ async function resolve(machine: Pick<Machine, 'stateDir'>, config: unknown, prob
   const repository = access.name
   if (access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
   return {
+    host: 'github',
     repository,
     account: { command: 'gh', cli, login: agent.login, commitEmail: `${agent.id}+${agent.login}@users.noreply.github.com` },
     git: { origin: ORIGIN, helper: credentialHelper(cli), insteadOf: ['git@github.com:', 'ssh://git@github.com/'] },
@@ -45,5 +46,5 @@ export const githubHost: RepositoryHost = {
     const pull = await readPull(ctx, number, signal)
     return () => claimPull(ctx, ticketId, pull)
   },
-  pullEndNotices,
+  pullEndNotices: (ticket, request, deployment) => pullEndNotices(ticket, request, deployment.repository),
 }

@@ -31,7 +31,7 @@ describe('ticketStage', () => {
     ['a running Assignment', ticket(), { stage: 'working' }],
     ['a progress Report', ticket({ assignments: [reported('progress')] }), { stage: 'working' }],
     ['an ended Ticket', ticket({ ended, attention, assignments: [reported('failed')] }), { stage: 'ended' }],
-  ])('%s', (_name, value, stage) => { expect(ticketStage(value)).toEqual(stage) })
+  ])('%s', (_name, value, stage) => { expect(ticketStage(value, input => !!input.human)).toEqual(stage) })
 })
 
 describe('canRetry', () => {
@@ -52,10 +52,10 @@ describe('canRetry', () => {
       ticket({ ...answered, delivery: { error: 'offline', at: '' }, assignments: [reportedAt('failed')] })],
     ['a working Ticket whose Input could not be delivered', true, ticket({ delivery: { error: 'offline', at: '' } })],
     ['an ended Ticket whose Input could not be delivered', false, ticket({ ended, delivery: { error: 'offline', at: '' } })],
-  ])('%s: %s', (_name, expected, value) => { expect(canRetry(value)).toBe(expected) })
+  ])('%s: %s', (_name, expected, value) => { expect(canRetry(value, input => !!input.human)).toBe(expected) })
   it('offers a retry in each person stage a new Assignment remedies', () => {
     const delivery = ticket({ ...answered, delivery: { error: 'offline', at: '' }, assignments: [reportedAt('failed')] })
-    expect(ticketStage(delivery)).toEqual({ stage: 'person', action: 'delivery' })
-    expect(canRetry(delivery)).toBe(true)
+    expect(ticketStage(delivery, input => !!input.human)).toEqual({ stage: 'person', action: 'delivery' })
+    expect(canRetry(delivery, input => !!input.human)).toBe(true)
   })
 })

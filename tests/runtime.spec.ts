@@ -22,7 +22,7 @@ import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { feishuKind } from '../src/sources/feishu.ts'
 import { githubKind, pollRound } from '../src/sources/github.ts'
 import { CliError, Commands } from '../src/infra/commands.ts'
-import { UserError, key, runningAssignment, said, threadKey, waitsForPerson, type Trigger } from '../src/core/index.ts'
+import { inputAuthority, UserError, key, runningAssignment, said, threadKey, waitsForPerson, type Trigger } from '../src/core/index.ts'
 import { feishuTrigger } from '../src/sources/feishu.ts'
 import { feishuChannel } from '../src/sources/feishu-trigger.ts'
 import { commentTrigger, githubChannel } from '../src/sources/github-trigger.ts'
@@ -38,7 +38,7 @@ import { executorLoad, ticketDetail, ticketList } from '../src/app/views/tickets
 
 let runtime: Runtime
 const viewsOf = (value: Runtime) => ({ store: value.store, sources: value.sources, links: value.links() })
-const overviewOf = (value: Runtime) => overview(viewsOf(value), value.health, policyVersion(value.store.settings()), executorLoad(value.store, value.executor.activeCount()), value.setupProblem ?? value.feishuProblem)
+const overviewOf = (value: Runtime) => overview(viewsOf(value), value.health, policyVersion(value.store.settings()), executorLoad(value.store, value.executor.activeCount(), inputAuthority(value.store.triggers, value.sources)), value.setupProblem ?? value.feishuProblem)
 let directory: string
 let controller: { create: ReturnType<typeof vi.fn>; selectModel: ReturnType<typeof vi.fn>; resolveAgent: ReturnType<typeof vi.fn>; rename: ReturnType<typeof vi.fn>; prompt: ReturnType<typeof vi.fn>; inspect: ReturnType<typeof vi.fn> }
 type RegisteredTool = { name: string; output: { render: (args: unknown, result: unknown) => unknown }; execute: (args: unknown, execution: { signal: AbortSignal }) => Promise<unknown> }
@@ -673,12 +673,12 @@ it('retries only a failed, blocked or undelivered ticket with a new assignment, 
   expect(() => runtime.engine.retryTicket(ticket.id)).toThrow(new UserError('notRetryable'))
   const current = runtime.store.tickets.get(ticket.id)!
   await runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'failed', summary: 'LlmError: offline' })
-  expect(waitsForPerson(runtime.store.tickets.get(ticket.id)!)).toBe(true)
+  expect(waitsForPerson(runtime.store.tickets.get(ticket.id)!, inputAuthority(runtime.store.triggers, runtime.sources))).toBe(true)
   // A person may continue a failed worker in its Session; only an ended Ticket locks its tools.
   expect(guards.get(`worker-${ticket.id}`)!()).toBeUndefined()
   const retried = await runtime.engine.retryTicket(ticket.id)
   await runtime.idle()
-  expect(waitsForPerson(runtime.store.tickets.get(ticket.id)!)).toBe(false)
+  expect(waitsForPerson(runtime.store.tickets.get(ticket.id)!, inputAuthority(runtime.store.triggers, runtime.sources))).toBe(false)
   expect(runtime.store.tickets.get(ticket.id)!.assignments.map(item => item.state)).toEqual(['ended', 'running'])
   expect(retried.assignments.length).toBeGreaterThan(current.assignments.length)
   expect(retried.assignments.at(-2)!.endedReason).toBe('retried')
@@ -804,7 +804,7 @@ it('leaves waiting and blocked assignments alone after a restart and keeps block
   await runTool(sessionId, 'orchestrator_report', { state: 'blocked', summary: 'need credentials' })
   runtime.executor.resume()
   expect(runtime.store.tickets.get(ticket.id)!.assignments).toHaveLength(1)
-  expect(waitsForPerson(runtime.store.tickets.get(ticket.id)!)).toBe(true)
+  expect(waitsForPerson(runtime.store.tickets.get(ticket.id)!, inputAuthority(runtime.store.triggers, runtime.sources))).toBe(true)
   const other = await acceptedTicket(feishu('12', '@bot 另一个', { root_id: undefined }))
   await runTool(other.sessionId, 'orchestrator_report', { state: 'progress', summary: 'midway' })
   runtime.executor.resume()
@@ -1094,7 +1094,7 @@ it('runs the prepare command once for a new ticket, under the execution root wit
   const failed = await acceptedTicket(feishu('9', '@bot 修一下标题'))
   await runtime.idle()
   expect(runtime.store.tickets.get(failed.ticket.id)!.assignments.at(-1)).toMatchObject({ report: expect.objectContaining({ state: 'failed', summary: expect.stringContaining('The prepare command failed: fatal: no such clone') }) })
-  expect(waitsForPerson(runtime.store.tickets.get(failed.ticket.id)!)).toBe(true)
+  expect(waitsForPerson(runtime.store.tickets.get(failed.ticket.id)!, inputAuthority(runtime.store.triggers, runtime.sources))).toBe(true)
 })
 
 it('counts a ticket whose directory the host prepared before prepare commands existed as prepared', async () => {

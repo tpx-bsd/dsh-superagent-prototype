@@ -1,5 +1,5 @@
 /** Registry of installed Source kinds, their configured instances, and the Engine's SourceScope implementation. */
-import type { ChannelRef, OutboundMessage, ScopeResult, SourceScope, Trigger } from '../core/index.ts'
+import type { ActorRef, ChannelRef, OutboundMessage, ScopeResult, SourceScope, Trigger } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
 import { HealthBoard, type HealthEntry } from '../infra/health.ts'
 import { AdmissionTableSchema, type Settings } from '../policy.ts'
@@ -72,6 +72,12 @@ export class SourceRegistry implements SourceScope {
     const parsed = policy.schema.safeParse(rest)
     return { ...parsed.success ? parsed.data : policy.schema.parse({}), admission: AdmissionTableSchema.safeParse(admission ?? {}).data ?? {} }
   }
+  permitsHuman(actor: ActorRef, settings = this.settings()): boolean {
+    const policy = this.kinds.get(actor.source)?.policy
+    if (!policy?.permitsHuman) return true
+    const part = this.policyPart(actor.source, settings)
+    return !part || policy.permitsHuman(actor, part)
+  }
   channelAllowed(channel: { source: string; address: Record<string, string> }, settings = this.settings()): boolean {
     const kind = this.kinds.get(channel.source)
     if (!kind) return false
@@ -101,8 +107,8 @@ export class SourceRegistry implements SourceScope {
     const link = this.kinds.get(channel.source)?.channel?.link(channel.address, links)
     return link ?? { url: '', label: { zh: channel.source, en: channel.source } }
   }
-  find(query: string): { threads: string[]; terms: string[] } {
-    const found = [...this.kinds.values()].flatMap(kind => kind.find ? [kind.find(query)] : [])
+  find(query: string, settings = this.settings()): { threads: string[]; terms: string[] } {
+    const found = [...this.kinds.values()].flatMap(kind => kind.find ? [kind.find(query, this.resolve(kind, settings.sources[kind.kind]).config)] : [])
     return { threads: [...new Set(found.flatMap(item => item.threads))], terms: [...new Set(found.flatMap(item => item.terms))] }
   }
   repliesTo(trigger: Trigger): string | undefined { return this.kinds.get(trigger.source)?.repliesTo?.(trigger) }

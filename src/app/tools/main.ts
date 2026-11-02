@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { z } from 'zod'
-import { UserError, followupOwners, key, reasonText, type Decision, type DecisionKind, type EngineForMainSession, type EngineForPeople }
+import { UserError, followupOwners, key, reasonText, type Decision, type DecisionKind, type EngineForMainSession, type EngineForPeople, type SourceScope }
   from '../../core/index.ts'
 import { IM_WORDS, NOTE_WORDS, wordCount } from '../../infra/text.ts'
 import { AssessmentSchema, EvalReadSchema, WorktreeNameSchema, type MasterAssessor } from '../assessment.ts'
@@ -25,6 +25,7 @@ export interface MainToolsHost {
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'modelRetry'>
   readonly settings: Pick<Settings, 'view' | 'block' | 'save' | 'pause' | 'sync'>
   readonly assessor: Pick<MasterAssessor, 'context' | 'read' | 'decide'>
+  readonly sources: SourceScope
   readonly resources: ResourceHost
   /** Schedules a pass to carry out work queued by an Engine command (such as an Eval or ticket resume). */
   requestPass(): void
@@ -37,7 +38,7 @@ function routed(host: MainToolsHost, result: { decision?: DecisionKind; reason: 
   host.requestPass()
   const ticket = result.ticketId ? host.store.tickets.get(result.ticketId) : undefined
   return { ...(result.decision ? { decision: result.decision } : {}), reason: result.reason,
-    ...(ticket ? { ticket: ticketCard(ticket) } : {}) }
+    ...(ticket ? { ticket: ticketCard(ticket, host.resources.humanInput) } : {}) }
 }
 const fromDecision = (decision: Decision) => ({ decision: decision.kind, reason: reasonText(decision.reason), ticketId: decision.ticketId })
 /**
@@ -139,7 +140,7 @@ function routeTool(host: MainToolsHost): Tool {
           for (const id of result.triggerIds ?? []) if (!decided.has(id)) decided.set(id, item.trigger_id)
           const ticket = result.ticketId ? host.store.tickets.get(result.ticketId) : undefined
           return { ...head, ...(result.decision ? { decision: result.decision } : {}), reason: result.reason,
-            ...(ticket ? { ticket: ticketCard(ticket) } : {}) }
+            ...(ticket ? { ticket: ticketCard(ticket, host.resources.humanInput) } : {}) }
         } catch (error) {
           if (error instanceof UserError) return { ...head, refused: error.message }
           host.context.logger.warn('dsh-superagent could not route trigger %s: %s', item.trigger_id, String(error))
@@ -192,7 +193,7 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
       execute: async args => {
         // A follow-up that reached a ticket is its worker's to judge, which hands back what is not its own; a person may still requeue it.
         const trigger = host.store.triggers.get(args.trigger_id)
-        const owners = trigger ? followupOwners(trigger, host.store) : []
+        const owners = trigger ? followupOwners(trigger, host.store, host.sources) : []
         if (owners.length) throw new UserError('workerDecides', { tickets: owners.join(', ') })
         const queued = host.quietly(() => host.engine.reevaluate(args.trigger_id))
         host.requestPass()

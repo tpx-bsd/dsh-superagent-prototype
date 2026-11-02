@@ -71,17 +71,26 @@ The prepare command and Executor instructions receive the same execution variabl
 | `DSH_SUPERAGENT_GITHUB_REPOSITORY` | GitHub | The repository the Source watches, `owner/name` |
 | `DSH_SUPERAGENT_GITHUB_ACCOUNT`, `DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL` | GitHub | The agent account and its commit email |
 | `DSH_SUPERAGENT_GITHUB_NUMBER`, `DSH_SUPERAGENT_GITHUB_PR_HEAD` | GitHub | The Issue or pull request that started the Ticket, and its head ref when it is a pull request |
+| `DSH_SUPERAGENT_GITEA_URL`, `DSH_SUPERAGENT_GITEA_REPOSITORY` | Gitea | Server base URL and `owner/name`; Git uses `$DSH_SUPERAGENT_GITEA_URL/$DSH_SUPERAGENT_GITEA_REPOSITORY.git` |
+| `DSH_SUPERAGENT_GITEA_ACCOUNT`, `DSH_SUPERAGENT_GITEA_COMMIT_EMAIL` | Gitea | The agent account and its commit email |
+| `DSH_SUPERAGENT_GITEA_NUMBER`, `DSH_SUPERAGENT_GITEA_PR_HEAD` | Gitea | Originating Issue or PR number, and `refs/pull/<number>/head` for an originating PR; empty for other Sources |
 | `DSH_SUPERAGENT_FEISHU_BOT`, `DSH_SUPERAGENT_FEISHU_CHAT` | Feishu | The bot, and the chat that started the Ticket |
 
 Ticket-specific values come from its directory and originating Trigger. Other values come from the current deployment settings. Only the panel can change execution environment settings; text sent to the main Session cannot change the configured shell command.
 
-Workers reach GitHub through the agent account's `gh` and Feishu through the bot's `lark-cli`. Blocked commands fail when invoked by name.
+Workers reach GitHub through the agent account's `gh`, Gitea through Git and the host's direct HTTP API, and Feishu through the bot's `lark-cli`. A Gitea deployment blocks `gh` and `tea` by name. It supplies no Gitea CLI. Blocked commands fail when invoked by name.
+
+On Gitea, push the Ticket branch, then immediately report `state: progress`, `summary`, and `pr_open: {branch, title, body}` through `orchestrator_report`. The last branch segment must equal `DSH_SUPERAGENT_NAME`. The host creates the PR against the default branch, or adopts the agent-authored PR from the same repository, branch, and base in any state, even after its description changes, and binds it to the Ticket. Repeated reports are safe. Use `pr_number` for an existing PR the Ticket started on; never pass both fields. A claim must belong to the configured repository and Ticket. The host returns the opened PR's number, URL, and state.
+
+Git requires an explicit commit identity. Use the chosen Delivery requirements identity, or the agent's account and commit email when none is specified. Setup does not write a commit author into the Git configuration.
 
 These wrappers and directories establish defaults, not a security boundary. A worker can still execute a program by absolute path.
 
 ## Merging
 
-Auto-merge is governed by the **Delivery requirements** prompt. The host has no merge-specific decision logic.
+On Gitea, people merge. The host supplies no merge operation and the Gitea delivery instructions prohibit workers from merging. Review approvals, inline review comments, and CI are not polled. Ask for decisions in the Issue or PR conversation.
+
+On GitHub, auto-merge is governed by the **Delivery requirements** prompt. The host has no merge-specific decision logic.
 
 By default, the Executor never enables auto-merge as the agent account: GitHub attributes the merge to whoever enabled it. Delivery requirements must name another account's CLI for merging. Without one, people merge the pull request.
 
@@ -95,13 +104,13 @@ Reviews without a body, such as approvals, also arrive as Triggers and can wake 
 - **Nothing to do:** an Executor that finds no work for a person to act on, such as a request that does not reproduce or is superseded, reports `dropped`. The Ticket ends without a message, unless a matched rule asks for one, and a person's later message on its Threads resumes it.
 ### Pull requests
 
-A Ticket follows the pull request it started from once its Executor reports it. It also follows each pull request opened from its branch once reported by the Executor or found by the GitHub Source. Reopened pull requests are followed again.
+A Ticket follows the pull request it started from once its Executor reports it. It also follows each pull request opened from its branch once reported by the Executor or found by the bound repository Source. Reopened pull requests are followed again.
 
 The Ticket is done when none of the pull requests it opened remain open. If it opened none, all pull requests it follows must be closed. It then ends with the outcome of the last relevant close and keeps its Subscriptions, allowing a later human comment to resume it.
 
 A close does not end the Ticket while resumed, retried or recovered work is unfinished. It also waits if the Executor acknowledged or answered a follow-up it owns but has not since made a non-progress Report or ended a turn after reading that message. A later `ready` Report ends the Ticket once the same pull-request completion rule is satisfied.
 
-Chat Channels receive one final notice about the pull-request outcome. GitHub already displays the outcome on the pull request itself. Removing a Ticket's Subscription to a pull request also stops it following that pull request.
+Chat Channels and distinct Gitea Issue conversations receive one final notice about the pull-request outcome. The terminal Gitea PR conversation receives none. GitHub Channels retain their existing skip behavior. Removing a Ticket's Subscription to a pull request also stops it following that pull request.
 
 "Awaiting review" therefore means a `ready` Report with a pull request.
 
@@ -113,7 +122,7 @@ An Input counts as read after the Session takes it into a step and subsequently 
 
 Threads followed only for context still deliver messages, but do not give the Ticket ownership of human follow-ups or resume ended Tickets. Those messages can be assessed independently.
 
-Sources poll subscribed Threads while a live Ticket subscribes, and for two weeks after the later of the last Trigger and the subscribing Tickets' end. Afterwards, messages arrive only through ordinary intake: GitHub notifications or Feishu live events.
+Sources poll subscribed Threads while a live Ticket subscribes, and for two weeks after the later of the last Trigger and the subscribing Tickets' end. Afterwards, messages arrive only through ordinary intake: GitHub notifications, Gitea repository polling, or Feishu live events.
 
 ## Failure and recovery
 
@@ -143,7 +152,7 @@ A retry ends the current Assignment and starts a new one in the same Executor Se
 The Executor model applies only when a Session is created; an existing Session keeps its model.
 ### Restart
 
-Running Assignments end with "host restarted" and new ones start with a recovery note that tells the Executor to check its directory, git history and GitHub before repeating any outside action, oldest Ticket first.
+Running Assignments end with "host restarted" and new ones start with a recovery note that tells the Executor to check its directory, git history and the repository host before repeating any outside action, oldest Ticket first.
 
 Assignments that are waiting, ready, blocked or failed stay as they are, unless an Input reached them after that Report, in which case they start again too.
 
@@ -169,6 +178,8 @@ A notified Issue or pull request whose reads keep failing is dropped a day after
 
 Its read position stays where it was, so a later notification or a poll of its Thread reads what the failed reads missed.
 
+Gitea polls repository Issues and comments within a server-time window, with a five-second overlap. Its first poll saves a repository activation time and a baseline cursor. Openings created since activation remain eligible when later edits move them into another polling window. Descriptions from before activation stay ignored. Later polls advance the repository cursor after receiving the covered Triggers. A failed feed read or interrupted intake leaves that cursor unchanged. Bound PRs are read directly each round for merge and close. Consecutive failures appear under `gitea`, after three rounds by default. Malformed list items are skipped and counted. HTTP 404 remains retryable.
+
 The Feishu event consumer reports every failure, and polling of subscribed topics keeps each failure on its Thread.
 
 A malformed item in a GitHub list or a Feishu page is skipped, and the Source's state counts it.
@@ -185,6 +196,8 @@ A message with failed attempts is a system problem until it goes out or is withd
 A message is dropped only when its Source no longer listens to the conversation, or when the Source answers that the conversation can never receive it; while its Source is off, it waits.
 
 The Sources answer that for a deleted Issue or a locked conversation on GitHub, and for a recalled message or one Feishu no longer finds on Feishu.
+
+Gitea sends only conversation comments. Before posting, it searches the agent's comments for the message's hidden marker, so a retry after a lost response posts no duplicate. HTTP 410 or a 403 with a verified locked conversation drops the message. A 404 stays pending for retry. Changing the configured Gitea server or repository drops replies addressed to the previous destination.
 
 A reply to a review comment that no longer exists goes to the pull request's conversation instead.
 

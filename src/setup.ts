@@ -1,10 +1,10 @@
 /** Structured startup and configuration errors with the settings location where the operator can fix them. */
 import { fill } from './infra/text.ts'
 
-export type SetupPlace = 'deployment' | 'github' | 'feishu'
+export type SetupPlace = 'deployment' | 'github' | 'gitea' | 'feishu'
 export const SETUP_PROBLEMS = {
   foreignFile: ['deployment', '{file} was not written by dsh-superagent; move it, or choose another state directory.'],
-  gitTooOld: ['deployment', 'git does not read the github.com credential configuration dsh-superagent writes; dsh-superagent needs git 2.32 or later.'],
+  gitTooOld: ['deployment', 'git does not read the credential configuration dsh-superagent writes for the repository host; dsh-superagent needs git 2.32 or later.'],
   environmentFailed: ['deployment', 'Preparing the agent environment failed.'],
   repositoryUnset: ['github', 'The GitHub Source names no repository.'],
   agentCliUnset: ['github', 'The agent GitHub CLI is not set.'],
@@ -14,6 +14,18 @@ export const SETUP_PROBLEMS = {
   repositoryUnreadable: ['github', '@{account} cannot read {repository}.'],
   repositoryUnreported: ['github', 'The agent GitHub CLI did not return {repository}.'],
   repositoryReadOnly: ['github', '@{account} cannot push to {repository}.'],
+  giteaUrlUnset: ['gitea', 'The Gitea Source names no server URL.'],
+  giteaUrlRefused: ['gitea', 'The Gitea server URL {url} is refused: {reason}.'],
+  giteaRepositoryUnset: ['gitea', 'The Gitea Source names no repository.'],
+  giteaTokenFileUnset: ['gitea', 'The Gitea Source names no token file.'],
+  giteaTokenFile: ['gitea', 'The Gitea token file {file} cannot be used: {reason}.'],
+  giteaSignedOut: ['gitea', 'Gitea at {url} refuses the agent token (HTTP 401); write a valid token into the token file.'],
+  giteaForbidden: ['gitea', 'Gitea forbids the agent token its {operation} (HTTP 403); give the token the read and write scopes of users, issues and repositories.'],
+  giteaUnsupported: ['gitea', '{url} does not answer the Gitea API\'s {operation} as dsh-superagent needs; check the server URL and the Gitea version.'],
+  giteaUnreachable: ['gitea', 'Gitea at {url} cannot be reached.'],
+  giteaRepositoryUnreadable: ['gitea', '@{account} cannot read {repository} on Gitea.'],
+  giteaRepositoryReadOnly: ['gitea', '@{account} cannot push to {repository} on Gitea.'],
+  giteaNoCommitEmail: ['gitea', 'Gitea reports no email of @{account}; set the commit email on the Gitea card.'],
   feishuCliFailed: ['feishu', 'The bot lark-cli does not work.'],
   feishuNoApp: ['feishu', 'auth status of the bot lark-cli did not report the app.'],
   feishuBotNotReady: ['feishu', 'The bot identity of app {app} is {status}; configure the app secret with lark-cli.'],

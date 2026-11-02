@@ -21,7 +21,7 @@ function load(name: string) {
   if (!match) throw new Error(`Invalid packaged skill: ${path}`)
   return { name: match[1]!, description: match[2]!, content: match[3]!, path }
 }
-export const bundledSkills = { feishu: load('feishu'), github: load('github') }
+export const bundledSkills = { feishu: load('feishu'), github: load('github'), gitea: load('gitea') }
 /** A Source's built-in skill, whose text a team may override as `skill/<name>`. */
 export type SourceSkill = keyof typeof bundledSkills
 export const isSourceSkill = (name: string): name is SourceSkill => Object.hasOwn(bundledSkills, name)

@@ -4,6 +4,7 @@ import type { MandateBasis } from '../src/core/index.ts'
 import { migrateSettings } from '../src/app/migration.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 import { feishuKind } from '../src/sources/feishu.ts'
+import { giteaKind } from '../src/sources/gitea.ts'
 import { githubKind } from '../src/sources/github.ts'
 import type { Thread, Ticket, Trigger } from '../src/core/index.ts'
 
@@ -482,5 +483,46 @@ describe('bots and events without a sender', () => {
       ['pulls', { listedUnaddressed: false, unlistedAddressed: true, unlistedUnaddressed: false }],
       ['comments', { listedUnaddressed: false, unlistedAddressed: true, unlistedUnaddressed: false }],
       ['ci', { listedUnaddressed: false, unlistedAddressed: false, unlistedUnaddressed: false }]])
+  })
+})
+
+
+describe('current human authority', () => {
+  it('revalidates human bases against a source veto before their early returns, retaining real inferred bot mandates', () => {
+    const old = SettingsSchema.parse({ ...base, sources: { ...base.sources,
+      gitea: { enabled: true, config: { url: 'http://127.0.0.1', repository: 'acme/widgets', tokenFile: '/token' } } },
+      policy: { ...base.policy, sources: { ...base.policy.sources, gitea: { allowed: [{ id: 'alice' }] } } } })
+    const now = SettingsSchema.parse({ ...old, policy: { ...old.policy,
+      sources: { ...old.policy.sources, gitea: { allowed: [{ id: 'alice' }], bots: [{ id: 'ALICE' }] } } } })
+    const registry = new SourceRegistry(() => now)
+    registry.register(giteaKind)
+    const scope = (settings: Settings) => ({ scope: (input: { source: string; meta: Record<string, unknown> }) => registry.scope(input, settings),
+      permitsHuman: (actor: Trigger['actor']) => registry.permitsHuman(actor, settings) })
+    const before = settingsPolicy(old, scope(old)), after = settingsPolicy(now, scope(now))
+    const actor = { source: 'gitea', id: 'alice' }
+    const bases: MandateBasis[] = [
+      { via: 'addressed', addressed: 'mention' }, { via: 'followup' }, { via: 'listed' },
+      { via: 'admission', cell: 'unlistedAddressed', addressed: 'mention' },
+    ]
+    for (const basis of bases) {
+      const mandate = { actor, basis, strength: 'explicit' as const, policyVersion: before.version, scope: '' }
+      expect(before.revalidate(mandate)).toBe(true)
+      expect(after.revalidate(mandate)).toBe(false)
+    }
+    expect(after.revalidate({ actor, basis: { via: 'followup' }, strength: 'inferred', policyVersion: before.version, scope: '' })).toBe(false)
+    expect(after.revalidate({ actor, basis: { via: 'bot', observation: { mode: 'auto' } }, strength: 'inferred', policyVersion: after.version, scope: '' })).toBe(true)
+    expect(after.revalidate({ actor, basis: { via: 'bot', observation: { mode: 'auto' } }, strength: 'explicit', policyVersion: after.version, scope: '' })).toBe(false)
+  })
+  it('keeps GitHub and Feishu ordinary-account bot-list behavior and never upgrades a non-human trigger', () => {
+    const settings = SettingsSchema.parse({ ...base, policy: { ...base.policy, sources: {
+      github: { allowed: [{ id: 'alice' }], bots: [{ id: 'alice' }] },
+      feishu: { allowed: [{ id: MEMBER }], bots: [{ id: MEMBER }] },
+    } } })
+    const { sources, policy } = setup(settings)
+    for (const trigger of [github('alice', 'mention'), feishu()]) {
+      expect(sources.permitsHuman(trigger.actor)).toBe(true)
+      expect(policy.gate(trigger, thread(), [])).toMatchObject({ strength: 'explicit' })
+      expect(policy.gate({ ...trigger, human: false }, thread(), [])).toMatchObject({ strength: 'inferred', basis: { via: 'bot' } })
+    }
   })
 })

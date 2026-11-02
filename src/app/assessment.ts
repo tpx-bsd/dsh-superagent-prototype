@@ -1,7 +1,7 @@
 /** Proactive candidate assessment for the main Session: relays candidate cards, serves bounded context reads, and records outcomes. */
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { z } from 'zod'
-import { reasonText, threadKey, type Assessor, type AssessmentOutcome, type Candidate, type EngineForMainSession,
+import { reasonText, threadKey, type InputAuthority, type Assessor, type AssessmentOutcome, type Candidate, type EngineForMainSession,
   type Trigger } from '../core/index.ts'
 import { AdmissionDirectionSchema, RuleAssessmentSchema, assessmentOutcome, directionAllowed, type Settings } from '../policy.ts'
 import { checkedImText } from '../infra/text.ts'
@@ -47,6 +47,7 @@ interface EvalReads { cache: ReadCache; context?: AssessmentContext; error?: str
 const NO_CONTEXT = 'This Source gives no Thread context; assess the Trigger\'s own text and the batch.'
 /** Host dependencies used by `MasterAssessor`. */
 export interface AssessorHost {
+  readonly humanInput: InputAuthority
   /** Active evaluations in `Engine` that the assessor reads and decides. */
   readonly engine: Pick<EngineForMainSession, 'candidate' | 'candidateDelivered' | 'decide'>
   readonly commands: Commands
@@ -216,7 +217,7 @@ export class MasterAssessor implements Assessor {
         return { trigger_id: item.id, actor: item.actor.id, at: item.at, ...text, ...'chars' in text ? { read: `trigger/${item.id}` } : {} }
       }) } : {},
       // The rules are in the main Session's Policy section, which names the version the candidate's Eval was built from.
-      ...relatedTickets(candidate.tickets), policy_version: candidate.policyVersion,
+      ...relatedTickets(candidate.tickets, this.host.humanInput), policy_version: candidate.policyVersion,
       thread }
   }
   /**

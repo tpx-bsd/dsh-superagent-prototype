@@ -16,6 +16,7 @@ const MARKER = '# Written by dsh-superagent on every start; edits are lost.'
 const LEGACY_MARKERS = ['dsh-tag', 'dsh-go', 'dsh-freelancer'].map(name => `# Written by ${name} on every start; edits are lost.`)
 /** Commands workers need, which `blockedCommands` cannot block: the shims and git. */
 export const WORKER_COMMANDS: readonly string[] = ['gh', 'git', 'lark-cli']
+const TOKEN_ACCOUNT_BLOCKED = ['gh', 'tea']
 export const workerBin = (stateDir: string): string => join(stateDir, 'worker-bin')
 export const workerGitConfig = (stateDir: string): string => join(stateDir, 'worker-gitconfig')
 export const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
@@ -96,10 +97,13 @@ export async function writeEnvironment(deployment: Pick<Deployment, 'stateDir' |
   ].join('\n')
   const run = (program: string): string => `${withoutShims}\nexec ${shellQuote(program)} "$@"`
   const fail = (message: string): string => `echo ${shellQuote(message)} >&2\nexit 1`
-  await shim(account.command, run(account.cli))
+  if ('cli' in account) await shim(account.command, run(account.cli))
+  // A token account has no CLI; a personal gh or tea on PATH would act as the operator.
+  else for (const name of TOKEN_ACCOUNT_BLOCKED) await shim(name, fail(`${name} is unavailable: this installation's repository is on Gitea; push with git and open the pull request through orchestrator_report.`))
   await shim('lark-cli', feishu ? run(feishu.cli) : fail('lark-cli is unavailable: this installation has no Feishu bot.'))
-  for (const name of new Set(blockedCommands.filter(name => name !== account.command && !WORKER_COMMANDS.includes(name)))) {
-    await shim(name, fail(`${name} is blocked in this installation; use ${account.command}, which acts as ${account.login}.`))
+  const instead = 'cli' in account ? `use ${account.command}, which acts as ${account.login}` : `git acts as ${account.login}`
+  for (const name of new Set(blockedCommands.filter(name => !kept.has(name) && !WORKER_COMMANDS.includes(name)))) {
+    await shim(name, fail(`${name} is blocked in this installation; ${instead}.`))
   }
   for (const name of before) if (!kept.has(name)) await unlink(join(dir, name))
   await own(workerGitConfig(stateDir), [
@@ -107,7 +111,7 @@ export async function writeEnvironment(deployment: Pick<Deployment, 'stateDir' |
     // Make git refuse to commit without an explicit identity set by the worker instead of guessing from the operator's OS user.
     '[user]', '\tuseConfigOnly = true',
     '[credential]', '\thelper =',
-    `[credential ${gitQuote(git.origin)}]`, `\thelper = ${gitQuote(git.helper)}`,
+    `[credential ${gitQuote(git.scope ?? git.origin)}]`, `\thelper = ${gitQuote(git.helper)}`, ...git.scope ? ['\tuseHttpPath = true'] : [],
     `[url ${gitQuote(`${git.origin}/`)}]`, ...git.insteadOf.map(prefix => `\tinsteadOf = ${prefix}`),
     // Include Git LFS filters because the operator's global gitconfig (which usually holds them) is ignored.
     '[filter "lfs"]', '\tclean = git-lfs clean -- %f', '\tsmudge = git-lfs smudge -- %f', '\tprocess = git-lfs filter-process', '\trequired = true',
@@ -137,7 +141,7 @@ export async function runAsWorker(subprocess: SubprocessRuntime, argv: string[],
 export async function verifyEnvironment(deployment: Pick<Deployment, 'git' | 'stateDir'>, subprocess: SubprocessRuntime, signal: AbortSignal): Promise<void> {
   const { git, stateDir } = deployment
   // `-z` separates fields with NUL and never quotes paths.
-  const helpers = (await runAsWorker(subprocess, ['git', 'config', '-z', '--show-origin', '--get-all', `credential.${git.origin}.helper`], stateDir, AbortSignal.any([signal, AbortSignal.timeout(60_000)])).catch(() => '')).split('\0')
+  const helpers = (await runAsWorker(subprocess, ['git', 'config', '-z', '--show-origin', '--get-all', `credential.${git.scope ?? git.origin}.helper`], stateDir, AbortSignal.any([signal, AbortSignal.timeout(60_000)])).catch(() => '')).split('\0')
   if (helpers.join('\0') !== [`file:${workerGitConfig(stateDir)}`, git.helper, ''].join('\0')) throw new SetupError('gitTooOld')
 }
 

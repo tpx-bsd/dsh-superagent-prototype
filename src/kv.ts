@@ -48,6 +48,9 @@ export const KV = {
     stream: family<{ since: string; started: Record<string, string>; etag?: string }, [stream: string]>('github-stream:'),
     branchCi: record<{ branch?: string; failures?: string[]; revision: number }>('github-branch-ci'),
     ci: family<{ fingerprint: string; revision: number }, [number: number]>('github-ci:') },
+  /** Gitea Source: initial activation and the time up to which changes were received, by `repositoryKey`. */
+  gitea: { activated: family<string, [repository: string]>('gitea-activated:'),
+    cursor: family<string, [repository: string]>('gitea-cursor:') },
   /**
    * Feishu Source: known chats (`true` for direct messages); per-chat history cursor and active topics mapped from topic ID
    * to last-seen timestamp; and per-polled-thread seen message IDs and initialization flag.

@@ -1,0 +1,12 @@
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: 3082
+- id: dsh-superagent
+  config:
+    stateDir: <absolute path, for example /home/me/.dsh/state/superagent>
+    repositoryHost: gitea
+- id: dsh-superagent-github
+  disabled: true
+- id: dsh-superagent-gitea
+  disabled: false
