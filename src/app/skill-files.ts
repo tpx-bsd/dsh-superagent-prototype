@@ -22,6 +22,9 @@ function load(name: string) {
   return { name: match[1]!, description: match[2]!, content: match[3]!, path }
 }
 export const bundledSkills = { feishu: load('feishu'), github: load('github') }
+/** A Source's built-in skill, whose text a team may override as `skill/<name>`. */
+export type SourceSkill = keyof typeof bundledSkills
+export const isSourceSkill = (name: string): name is SourceSkill => Object.hasOwn(bundledSkills, name)
 /**
  * Loads a built-in prompt file (`prompts/<name>.md`). Source `.md` files are written one sentence per line for
  * readable diffs; `promptFile` joins lines within each paragraph with spaces while keeping blank-line paragraph breaks.
