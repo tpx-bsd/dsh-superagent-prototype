@@ -36,7 +36,7 @@ Shutdown cancels turns, waits for passes, effects and agents, restores the proce
 
 | Part | Module | Does |
 | --- | --- | --- |
-| Setup | `src/app/setup.ts` | Resolves the repository and the agent's account through the repository host, and the Feishu bot, by probing their CLIs the way worker shells run them, writes and applies the workers' environment, command shims and git access, checks git reads that access, and keeps the setup problems; Settings checks a changed account through it, and restarts through it, which runs setup again |
+| Setup | `src/app/setup.ts` | Resolves the repository and the agent's account through the repository host, through GitHub CLI or Gitea HTTP, and the Feishu bot through its CLI, writes and applies the workers' environment, command shims and git access, checks git reads that access, and keeps the setup problems; Settings checks a changed account through it, and restarts through it, which runs setup again |
 | Passes | `src/app/passes.ts` | One pass at a time, every two seconds and whenever a command asks: the due effects, then `Engine.evaluateDue`; a Source's Trigger reaches the Engine through it |
 | Outbox | `src/app/outbox.ts` | The Engine's `Outbox` port, and the only writer of the receipts: `send` keeps a message's receipt and queues its `reply` effect in one transaction, and the effect's handler sends it through `SourceRegistry.send`; a message waits while its Source is off, and is dropped when the conversation is gone or not listened to |
 | Notices | `src/app/notices.ts` | Converts domain events and worker activity into main-Session messages. `eventNotice` handles domain notices; `reportRelay` forwards questions immediately, keeps ordinary progress on its Ticket, and relays other reports; `followupRelay` names the Tickets that own a human follow-up. Relays arriving during a turn are delivered together at its next step through the DeepSeek Harness inbox |
@@ -194,12 +194,15 @@ Plugins receive `SourceHost`: the registry and `context(kind)`. The kind itself 
 
 That context supplies deployment and commands, setup readiness (`ready`, `configured`, `problem`), configuration, `receive`, `atomic`, and typed `state`. It also exposes Thread reads and metadata writes, Ticket reads and binding/closure commands, Trigger reads, `notify` through Outbox, and `report` for declared health entries.
 
-The repository the deployment works on is bound through one `RepositoryHost` (`src/sources/host.ts`), which Runtime selects once, `githubHost` (`src/sources/github-host.ts`) by default, and which a test may replace. It is not a Source kind: setup needs it before any Source plugin registers, and it works while the GitHub plugin is off. It has the Source it binds (`source`), whose kind names its settings block, `SETUP_FIELDS` entry, setup place and built-in skill, and four operations:
+The repository the deployment works on is bound through one `RepositoryHost` (`src/sources/host.ts`), which Runtime selects once from machine `repositoryHost`, `githubHost` by default or `giteaHost` for Gitea. A test may replace it. It is not a Source kind: setup needs it before any Source plugin registers, and it works while its Source plugin is off. It has the Source it binds (`source`), whose kind names its settings block, `SETUP_FIELDS` entry, setup place and built-in skill, and these operations:
 
-- `resolve` checks the account CLI and its push access, and returns a `RepositoryAccess`: the canonical repository, the `Account` (`command`, the name workers call its CLI by, `cli`, `login` and `commitEmail`) and the `GitAccess` (`origin`, `helper` and the `insteadOf` prefixes) that setup writes into the worker git configuration and checks. It throws `SetupError`s placed at the Source's kind.
+- `resolve` checks account identity and push access. It returns `RepositoryAccess` with the canonical repository, `Account`, `GitAccess`, and the Gitea version when applicable. `Account` holds `login` and `commitEmail`, plus either CLI `command` and `cli`, or Gitea `server` and `tokenFile`. `GitAccess` holds `origin`, `helper`, `insteadOf` prefixes, and optional repository `scope`. Setup writes and checks that access. Failures are `SetupError`s placed at the Source's kind.
 - `readPath` reads a file or a directory of the configured repository for the assessor.
 - `pullClaim` reads a pull request an Executor reported before the report's transaction, and returns a synchronous claim that the report runs inside it, so a refused claim records no report, relay or binding.
+- Optional `openPull` reads or creates a PR before the report transaction and returns a synchronous claim. Gitea implements it for `orchestrator_report.pr_open`; GitHub keeps its CLI workflow. Gitea reuses a marked PR from the same branch and default base, including after a conflict or ambiguous response. Shared `claimPull` checks the live Ticket and exclusive ownership inside the transaction. It accepts the originating PR or an agent-authored PR from the same repository and Ticket branch.
 - `pullEndNotices` gives the chat notices of a Ticket that ended merged or closed.
+
+Gitea's `GiteaApi` owns HTTP, wire parsing, pagination, and token reads. `readToken` and the bundled Git helper keep credentials out of settings contents, arguments, and model text. The helper uses the repository scope and `useHttpPath`; GitHub's generated environment remains unchanged. Gitea Trigger ids, `gitea:<repository key>:<number>` Threads, Channels, and cursor keys include server and repository identity. Channels and scope compare both against current settings.
 
 Setup, the assessor, the Executor tools, the end notices and the Source skills use the same host. The `Deployment` that setup resolves is the `Machine`, the `RepositoryAccess` and the Feishu bot; it is rebuilt on every start and never stored.
 
@@ -258,7 +261,7 @@ Each model request binds the Session to the current prompt revision. The revisio
 | `src/app/tools/main.ts`, `src/app/tools/executor.ts` | Tool arguments of the main Session and the Executor Sessions into calls of the core classes, and their results into cards |
 | `src/app/http.ts`, `src/app/views/`, `src/app/api.ts` | HTTP requests into calls, and Store reads into the panel's views; `api.ts` types every route for the panel |
 | `src/app/resources.ts`, `src/app/links.ts`, `src/app/cards.ts` | Resource names into reads, source messages into links, records into compact cards for models |
-| `src/sources/github*.ts`, `src/sources/feishu*.ts`, `src/sources/poll.ts` | GitHub and Feishu payloads into Triggers and Thread facts, and messages into CLI calls |
+| `src/sources/github*.ts`, `src/sources/gitea*.ts`, `src/sources/feishu*.ts`, `src/sources/poll.ts` | Repository and chat payloads into Triggers and Thread facts, and messages into HTTP or CLI calls |
 | `src/deployment.ts`, `src/setup.ts`, `src/infra/` | Setup probes and problems, CLI transport, the agent's process environment |
 
 ## Dependency rules
@@ -283,14 +286,14 @@ Each model request binds the Session to the current prompt revision. The revisio
 - **Fixed refusals.** A refusal a person or an agent can cause is a `UserError(code, values)` from `USER_ERRORS` in `src/core/errors.ts`. The management API answers a `missing` code with 404 and the others with 400, and the panel words each code in its language. Setup problems are `SetupError` codes (`src/setup.ts`) and fixed health texts `HealthCode`s (`src/sources/host.ts`), worded the same way.
 ### Source-specific dependencies
 
-Some generic modules still refer directly to GitHub or Feishu:
+Some generic modules still refer directly to individual Sources:
 
 - Outbox applies the Feishu chat word limit.
 - `src/app/links.ts` resolves Feishu message links and `repliedTo`. It and Runtime read settings with `feishuSettings`.
-- `src/app/resources.ts` reads the `feishu/` and `github/` originals, and `src/app/cards.ts` uses `pullOf` for Ticket cards. Both read what the GitHub and Feishu Sources stored, such as `github:<number>` Threads a Ticket follows, so they stay Source-specific; a second repository host adds its own readers there.
-- Runtime selects `githubHost`, the only place shared code names the GitHub binding. Setup, MasterAssessor, the Executor tools and the end notices reach it as a `RepositoryHost`.
+- `src/app/resources.ts` reads the `feishu/`, `github/`, and `gitea/` originals. `src/app/cards.ts` uses host-neutral `pullOf` for Ticket cards.
+- Runtime maps `repositoryHost` to `githubHost` or `giteaHost`. Setup, MasterAssessor, the Executor tools and the end notices reach it as a `RepositoryHost`.
 - The bundled skills are the Source skills (`SourceSkill` in `src/app/skill-files.ts`): Feishu's with a working bot, then the repository host's. Migration converts their schema-10 records.
-- Setup probes only GitHub and Feishu account fields (`SETUP_FIELDS`). Only those Sources receive account setup problems through `SourceContext.problem`.
+- Setup validates the selected repository host and Feishu account fields (`SETUP_FIELDS` includes GitHub, Gitea, and Feishu). Only those Sources receive account setup problems through `SourceContext.problem`.
 - `Commands.api`, `pages` and `gh` are the GitHub Source's transport. `api` and `pages` limit paths to the configured repository; no shared module calls these transport methods directly.
 
 
@@ -415,7 +418,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/locales.ts` | All copy in both languages, and the glossary of [001 Domain model](001-domain.md) |
 | `src/client/client.css`, `css.d.ts` | The panel's stylesheet, loaded as text |
 
-`src/sources/github.ts` and `src/sources/feishu.ts` are also the entries of the two Source plugins, built by `tsdown.config.ts` and exported in `package.json` as `./github-watch` and `./feishu-watch`. The bundle's `cordis.patch.yml` inserts the three plugins, with Feishu disabled.
+The three Source entries are `src/sources/github.ts`, `src/sources/gitea.ts`, and `src/sources/feishu.ts`, exported as `./github-watch`, `./gitea-watch`, and `./feishu-watch`. `tsdown.config.ts` also builds `gitea-credential`. The bundle's `cordis.patch.yml` inserts the main plugin and all three Sources, with Gitea and Feishu disabled by default.
 
 ## Tests
 
@@ -496,7 +499,7 @@ A generated column is computed from its row's JSON and is empty outside its set,
 | Prompt versions | `prompt-revision`, `prompt-version:<n>` |
 | Main Session | `master-id` |
 | Session prompt history | `session-prompts:<session id>` |
-| Source state | Read positions such as `github-cursor:<number>`, PR CI fingerprints and seen Feishu-topic messages; keys begin with the kind or `thread-` plus a Thread key |
+| Source state | Read positions such as `github-cursor:<number>` and `gitea-cursor:<repository key>`, PR CI fingerprints and seen Feishu-topic messages; keys begin with the kind or `thread-` plus a Thread key |
 | Display names | `source-labels:<source id>` |
 
 Dismissal is stored on its Decision. Input text is rendered from the Ticket when read, so neither needs a separate key-value record.
@@ -584,13 +587,13 @@ Ticket cards use the closed `TICKET_STATES` set from `src/app/cards.ts`: an open
 | `settings`, `settings/<block>` | Revisions and summaries, or a complete block ready to save |
 | `prompts`, `prompts/<revision>`, `prompts/current`, `prompts/defaults`, `prompt-preview/<id>` | Prompt configurations and composed text |
 | `models`, `models/<provider>` | Available models |
-| `feishu/<trigger id>/…`, `github/…` | Original Source records, described in the Source skills |
+| `feishu/<trigger id>/…`, `github/…`, `gitea/…` | Original Source records, described in the Source skills |
 
 Ticket Threads are marked `context` for context-only follows and `bound` for Source bindings. Assignment pages are newest first and include report previews. Continue lists with `next_offset`. `/input/<id>` accepts an Input's name or id. `settings` includes small blocks in full and summarizes Policy and Source blocks.
 
 Source resources include message neighborhoods, `github/pulls/<n>/thread/<comment id>` and `github/commits/<sha>/checks`.
 
-An original's messages read in one compact shape, `{id, from, at, text, reply_to?, path?, line?, url?}`, not as GitHub or Feishu records them.
+An original's messages read in one compact shape, `{id, from, at, text, reply_to?, path?, line?, url?}`, not as GitHub, Gitea, or Feishu records them.
 
 An Executor Session reads only its own Ticket, its Threads, the Triggers that reached it or that its request held, the prompt versions it worked under and the originals, and its pages leave out the ids of what it cannot read, Decisions and other Tickets.
 
@@ -625,13 +628,13 @@ Most built-in instructions live in `prompts/*.md`, with one sentence per line jo
 
 ## Configuration reload
 
-Every plugin configuration key except `stateDir` is volatile. The panel's Deployment settings and DeepSeek Harness's Plugin Manager edit them through DeepSeek Harness's configuration form; the host writes `cordis.patch.yml` and updates the values in place, and dsh-superagent reads each limit when it uses it, so a change applies without a restart.
+`stateDir` and `repositoryHost` are startup configuration. The other plugin configuration keys are volatile. The panel's Deployment settings and DeepSeek Harness's Plugin Manager edit them through DeepSeek Harness's configuration form; the host writes `cordis.patch.yml` and updates the values in place, and dsh-superagent reads each limit when it uses it, so a change applies without a restart.
 
-A settings save that changes a Source field setup reads, such as an account's CLI, and any save while setup waits, restarts dsh-superagent. DeepSeek Harness's settings service does not serve the entry during that restart, so after its own restart dsh-superagent asks it to read the entry again, and an open form becomes editable again.
+A settings save that changes a Source field setup reads, such as an account's CLI or Gitea token-file path, and any save while setup waits, restarts dsh-superagent. DeepSeek Harness's settings service does not serve the entry during that restart, so after its own restart dsh-superagent asks it to read the entry again, and an open form becomes editable again.
 
 ## Reviewing a change against real data
 
-Point `DSH_HOME` at a temporary directory and create a new profile there. Copy the database from a backup, disable every Source, pause processing and remove the main Session id. Give the GitHub and Feishu CLIs read-only stand-ins.
+Point `DSH_HOME` at a temporary directory and create a new profile there. Copy the database from a backup, disable every Source, pause processing and remove the main Session id. Give the GitHub and Feishu CLIs read-only stand-ins. For Gitea, use a controlled HTTP stand-in with a nonproduction token file; disabling a Source does not prevent repository-host setup calls.
 
 ## Open questions
 
