@@ -32,7 +32,7 @@ export async function standInGitea() {
   const comments: Comment[] = []
   const failures: Failure[] = []
   const requests: { method: string; path: string }[] = []
-  let clock = Date.parse('2026-11-02T09:00:00Z'), ids = 100
+  let clock = Math.floor(Date.now() / 1000) * 1000, ids = 100
   let url = ''
   const time = (ms: number) => new Date(ms + 3600_000).toISOString().replace(/\.\d{3}Z$/, '+01:00')
   const page = (url: URL, items: unknown[], response: ServerResponse) => {

@@ -16,7 +16,7 @@ export interface GiteaUser { id: number; login: string; type: 'User' | 'Bot' | '
 /** An Issue or pull request description; `migrated` marks content imported from another service under a placeholder author. */
 export interface GiteaIssue {
   number: number; isPr: boolean; title: string; body: string; author: GiteaUser; migrated: boolean
-  createdAt: string; updatedAt: string; url: string; locked: boolean
+  state: 'open' | 'closed'; createdAt: string; updatedAt: string; url: string; locked: boolean
 }
 /** A comment of an Issue's or a pull request's conversation. */
 export interface GiteaComment {
@@ -67,10 +67,10 @@ const UserSchema = z.looseObject({ id: z.number().int(), login: z.string().min(1
     type: user.type === 'User' || user.type === 'Bot' || user.type === 'Organization' ? user.type : 'unknown' }))
 const Migrated = { original_author: z.string().nullish() }
 const IssueSchema = z.looseObject({
-  number: z.number().int().positive(), title: z.string(), body: z.string().nullish(), user: UserSchema, ...Migrated,
+  number: z.number().int().positive(), title: z.string(), body: z.string().nullish(), user: UserSchema, ...Migrated, state: z.enum(['open', 'closed']),
   created_at: Time, updated_at: Time, html_url: z.string(), is_locked: z.boolean().optional(), pull_request: z.unknown().optional(),
 }).transform((issue): GiteaIssue => ({ number: issue.number, isPr: issue.pull_request != null, title: issue.title, body: issue.body ?? '',
-  author: issue.user, migrated: !!issue.original_author, createdAt: issue.created_at, updatedAt: issue.updated_at, url: issue.html_url,
+  author: issue.user, migrated: !!issue.original_author, state: issue.state, createdAt: issue.created_at, updatedAt: issue.updated_at, url: issue.html_url,
   locked: issue.is_locked ?? false }))
 const CommentSchema = z.looseObject({
   id: z.number().int().positive(), body: z.string().nullish(), user: UserSchema, ...Migrated, created_at: Time, updated_at: Time,

@@ -369,7 +369,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/kind.ts` | The `SourceKind` protocol |
 | `src/sources/registry.ts` | `SourceRegistry` |
 | `src/sources/host.ts` | `SourceHost`, `SourceContext`, `RepositoryHost`, `Health`, `health` and the fixed health texts |
-| `src/sources/poll.ts` | What GitHub and Feishu polling share: `POLL_HORIZON_MS`, `polled`, `cursorAt`, and `pollThreads`, which keeps a failure on its Thread as `pollError` |
+| `src/sources/poll.ts` | What the Sources' polling shares: `POLL_HORIZON_MS`, `polled`, `cursorAt`, `pollFailure`, and `pollThreads`, which keeps a failure on its Thread as `pollError` |
 | `src/sources/github.ts` | The GitHub kind and plugin entry, exported as `./github-watch`: a poll round of notifications, the pull requests of open Tickets with their CI, and subscribed Threads |
 | `src/sources/github-trigger.ts` | GitHub comments, reviews, Issue bodies and CI changes as Triggers, and GitHub addresses |
 | `src/sources/github-host.ts` | `githubHost`, the GitHub `RepositoryHost`: the setup probes of the agent's account and push access, its git access to github.com with `credentialHelper`, and the bindings to the repository reads and the pull request rules |
@@ -377,9 +377,12 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/github-pull.ts` | GitHub's pull request reads, and the shared rules applied to the `github:<number>` Threads |
 | `src/sources/github-channel.ts` | The GitHub Channel: comments and review thread replies, `sent` or `gone` |
 | `src/sources/github-read.ts` | CI snapshots, repository reads, the `github/` resources, and `githubThreadContext`: an Issue's or pull request's conversation by page |
+| `src/sources/gitea.ts` | The Gitea kind and plugin entry, exported as `./gitea-watch`: `pollFeed`, one poll of the repository's changed Issues, pull requests and comments under one read position per repository, and of the pull requests open Tickets follow |
+| `src/sources/gitea-channel.ts` | The Gitea Channel: conversation comments with a hidden marker that a retry finds, `sent` or `gone` |
+| `src/sources/gitea-read.ts` | `giteaThreadContext`, a conversation by page for assessments, and the `gitea/` resources |
 | `src/sources/gitea-api.ts` | `GiteaApi`, the Gitea Source's transport and the only module that sends Gitea requests: the configured repository's records parsed into `GiteaIssue`, `GiteaComment`, `GiteaPull` and `GiteaUser`, every page of a list, and `GiteaError`, which names the operation and the status and never an answer's body or the token; `giteaServer` and `repositoryKey` |
 | `src/sources/gitea-host.ts` | `giteaHost`, the Gitea `RepositoryHost`: the setup checks of the server URL, the token file, the agent's account and push access, its git access through the bundled credential helper, repository reads, the claim of a reported pull request, and `openPull`, which finds or opens the pull request a Ticket opened from its branch |
-| `src/sources/gitea-trigger.ts` | The Gitea Source's identities: `SOURCE` and `giteaThreads`, the `gitea:<repository key>:<number>` Threads of one repository |
+| `src/sources/gitea-trigger.ts` | Gitea Issues, pull requests and comments as Triggers: the `gitea:<repository key>:<number>` Threads of one repository, reply addresses that name the server and repository, and `authorOf`, which counts only a positive-id, unmigrated User off the Policy's bot list as a person |
 | `src/sources/gitea-token.ts` | `readToken`: the token from a regular file of this OS user that no one else may access |
 | `src/sources/gitea-credential.ts` | The git credential helper of a Gitea deployment, built as `lib/gitea-credential.js`: the token on git's pipe for exactly one repository URL |
 | `src/sources/feishu.ts` | The Feishu kind and plugin entry, exported as `./feishu-watch` |
@@ -424,7 +427,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the pull request rules, health |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
-| `tests/gitea.spec.ts` | The application on the simulated host bound to a stand-in Gitea: setup and its problems, the scoped git credentials, and pull requests a worker opens through `orchestrator_report`, adopted after a race, a lost answer or a person's close |
+| `tests/gitea.spec.ts` | The application on the simulated host bound to a stand-in Gitea: setup and its problems, the scoped git credentials, pull requests a worker opens through `orchestrator_report`, adopted after a race, a lost answer or a person's close; the Source's polls, with who counts as a person, repeated and interrupted polls, a reply whose answer was lost, a restart with a follow-up and a waiting reply, merges and closes, reads and variables |
 | `tests/gitea-api.spec.ts` | `GiteaApi` against a stand-in server: paging that ignores limits or pages, errors without bodies, no redirect, the private token file, and the credential helper's exact repository scope |
 | `tests/feishu-read.spec.ts`, `tests/github-read.spec.ts` | Feishu and GitHub reads |
 | `tests/admission-context.spec.ts`, `tests/feishu-image.spec.ts` | The Thread window of assessments, and Feishu image reads |

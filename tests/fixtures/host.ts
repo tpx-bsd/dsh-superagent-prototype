@@ -135,9 +135,11 @@ export function subagentRuntime(agents: Map<string, FakeAgent>) {
   return { service, settle, spawn, live: (id: string) => !!children.get(id)?.live }
 }
 
-/** @param seed - writes to the database before the Runtime opens it, such as records an earlier version stored. */
-export async function startRuntime(seed?: (store: Store) => void, repositoryHost?: RepositoryHost) {
-  const directory = mkdtempSync(join(tmpdir(), 'orchestrator-host-'))
+/**
+ * @param seed - writes to the database before the Runtime opens it, such as records an earlier version stored.
+ * @param directory - the state directory of a Runtime that ran before and stopped with `stop(true)`, which this one restarts on.
+ */
+export async function startRuntime(seed?: (store: Store) => void, repositoryHost?: RepositoryHost, directory = mkdtempSync(join(tmpdir(), 'orchestrator-host-'))) {
   const AGENT = join(directory, 'agent-gh'), BOT = join(directory, 'lark-bot')
   const repository = { default_branch: 'master', permissions: { push: true } }
   vi.spyOn(Commands.prototype, 'gh').mockImplementation(async args => args[1] === 'user' ? { login: 'agent-bot' } : repository)
@@ -296,7 +298,7 @@ export async function startRuntime(seed?: (store: Store) => void, repositoryHost
     await http(req, { writeHead: (code: number) => { status = code }, end: (data: string) => { text = data } })
     return { status, body: JSON.parse(text) as Record<string, unknown> }
   }
-  async function stop() { await runtime.stop(); vi.restoreAllMocks(); rmSync(directory, { recursive: true, force: true }) }
+  async function stop(keep = false) { await runtime.stop(); vi.restoreAllMocks(); if (!keep) rmSync(directory, { recursive: true, force: true }) }
   /** The Session's model takes its next step, which takes the messages steered in since its last. */
   const step = (sessionId: string) => { steps.get(sessionId)!() }
   /** A step of the worker claims what waits for it, and is cut off before the Session took it. */

@@ -6,8 +6,15 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { workerBin, workerGitConfig } from '../src/infra/environment.ts'
 import { SetupError } from '../src/setup.ts'
-import { repositoryKey } from '../src/sources/gitea-api.ts'
+import { GiteaApi, repositoryKey } from '../src/sources/gitea-api.ts'
 import { giteaHost } from '../src/sources/gitea-host.ts'
+import { giteaKind, pollFeed } from '../src/sources/gitea.ts'
+import { sendGitea } from '../src/sources/gitea-channel.ts'
+import { readGitea } from '../src/sources/gitea-read.ts'
+import { apply as applyGithub } from '../src/sources/github.ts'
+import { KV } from '../src/kv.ts'
+import { threadKey, type Trigger } from '../src/core/index.ts'
+import { settingsPolicy } from '../src/policy.ts'
 import { feishu, startRuntime, type Host } from './fixtures/host.ts'
 import { gitEnv } from './fixtures/git.ts'
 import { REPOSITORY, standInGitea, TOKEN, USERS, type StandInGitea } from './fixtures/gitea.ts'
@@ -122,5 +129,195 @@ describe('pull requests', () => {
     const other = gitea.issue(USERS.agent, 'Other', 'Other.', { head: 'agent/other', base: 'main' })
     await expect(report({ pr_number: other })).rejects.toThrow('PR does not belong to this ticket')
     expect(created()).toBe(0)
+  })
+})
+
+describe('the Gitea Source', () => {
+  async function source(stand?: StandInGitea, directory?: string) {
+    const owned = stand ?? (gitea = await standInGitea())
+    h = await startRuntime(store => {
+      const settings = store.settings()
+      store.saveSettings({ ...settings, sources: { ...settings.sources, gitea: { enabled: true, config: config(owned) } } })
+    }, giteaHost, directory)
+    const host = h
+    host.runtime.sources.register(giteaKind)
+    const settings = host.runtime.store.settings()
+    host.runtime.store.saveSettings({ ...settings, policy: { ...settings.policy,
+      sources: { ...settings.policy.sources, gitea: { allowed: [{ id: 'alice' }], bots: [{ id: 'review-runner' }] } } } })
+    const received: Trigger[] = []
+    const poll = (signal = new AbortController().signal, after?: () => void) => {
+      const ctx = host.runtime.context(giteaKind)
+      return pollFeed({ ...ctx, deployment: ctx.deployment, receive: async trigger => {
+        received.push(trigger); const result = await ctx.receive(trigger); after?.(); return result
+      } }, signal)
+    }
+    const key = repositoryKey(owned.url, REPOSITORY)
+    const accept = async (trigger: Trigger) => {
+      await host.runtime.idle()
+      const result = await host.route({ kind: 'accept', trigger_id: trigger.id, title: 'Fix the login', worktree_name: 'fix-login', acknowledgement: 'On it.' })
+      await host.runtime.idle()
+      return host.runtime.store.tickets.get((result.ticket as { ticket_id: string }).ticket_id)!
+    }
+    return { h: host, gitea: owned, poll, received, accept, cursor: () => host.runtime.store.get(KV.gitea.cursor(key)), thread: (number: number) => `gitea:${key}:${number}` }
+  }
+  it('takes an allowed person\'s mention as one explicit request, and gives no one else, nor the agent\'s own echo, a person\'s authority', async () => {
+    const { h, gitea, poll, received, accept } = await source()
+    gitea.issue(USERS.alice, 'Before', '@agent from before the Source started')
+    gitea.tick(30)
+    await poll()
+    expect(received).toEqual([])
+    gitea.tick(30)
+    const request = gitea.issue(USERS.alice, 'Login broken', 'The login fails. @agent please fix it.')
+    gitea.comment(USERS.bob, request, '@agent do something else')
+    gitea.comment(USERS.agent, request, 'Echo of @agent')
+    gitea.comment(USERS.renovate, request, '@agent bump everything')
+    gitea.comment(USERS.reviewer, request, '@agent review says fix')
+    gitea.comment(USERS.ghost, request, '@agent from a deleted account')
+    gitea.comment(USERS.untyped, request, '@agent with no type')
+    gitea.comment(USERS.alice, request, '@agent imported', 'alice-on-github')
+    gitea.comment(USERS.alice, request, 'no mention, no subscription yet')
+    gitea.tick(30)
+    expect(await poll()).toEqual({ received: 7, skipped: 0 })
+    expect(received.map(trigger => `${trigger.actor.id}:${trigger.human}:${trigger.addressed}`).sort()).toEqual(['Ghost:false:mention',
+      'alice:false:mention', 'alice:true:mention', 'bob:true:mention', 'carol:false:mention', 'renovate:false:mention', 'review-runner:false:mention'])
+    const policy = settingsPolicy(h.runtime.store.settings(), h.runtime.sources)
+    const gate = (trigger: Trigger) => {
+      const verdict = policy.gate(trigger, h.runtime.store.threads.get(threadKey(trigger.threads[0]!))!, [])
+      return `${trigger.actor.id}:${verdict.admissible ? verdict.strength : verdict.reason}`
+    }
+    // Only the listed person's mention is a request; an ordinary account on the bot list is at most an inferred candidate.
+    expect(received.map(gate).sort()).toEqual(['Ghost:not_human', 'alice:explicit', 'alice:not_human', 'bob:not_a_member', 'carol:not_human',
+      'renovate:not_human', 'review-runner:inferred'])
+    const origin = received.find(trigger => trigger.meta.kind === 'issue')!
+    const ticket = await accept(origin)
+    // The same records read again, as the next window's overlap reads them, are duplicates.
+    received.length = 0
+    gitea.tick(1)
+    await poll()
+    expect(received).toEqual([])
+    expect(h.runtime.store.tickets.list()).toHaveLength(1)
+    await h.runtime.sendReplies()
+    expect(gitea.agentComments(request).map(comment => comment.body)).toEqual(['Echo of @agent', expect.stringMatching(/^On it\.\n\n<!-- dsh-superagent:.+ -->$/)])
+    expect(ticket.channels[0]).toMatchObject({ source: 'gitea', address: { server: gitea.url, repository: REPOSITORY, number: String(request) } })
+  })
+  it('keeps the read position through a poll that stopped or failed part-way, and reads what it missed once', async () => {
+    const { h, gitea, poll, received, cursor } = await source()
+    await poll()
+    const start = cursor()
+    gitea.tick(30)
+    const first = gitea.issue(USERS.alice, 'One', '@agent one')
+    const second = gitea.issue(USERS.alice, 'Two', '@agent two')
+    gitea.tick(30)
+    const controller = new AbortController()
+    await expect(poll(controller.signal, () => { controller.abort() })).rejects.toThrow('stopped during the poll')
+    expect(cursor()).toBe(start)
+    gitea.fail('GET', /\/issues\/comments$/, 500, 1)
+    gitea.comment(USERS.alice, first, '@agent and more')
+    gitea.comment(USERS.alice, first, '@agent and more again')
+    gitea.comment(USERS.alice, first, '@agent and once more')
+    gitea.tick(30)
+    await expect(poll()).rejects.toThrow('Gitea comments: HTTP 500')
+    expect(cursor()).toBe(start)
+    received.length = 0
+    await poll()
+    expect(cursor()).not.toBe(start)
+    expect(new Set(received.map(trigger => trigger.id)).size).toBe(5)
+    expect(received.map(trigger => trigger.meta.number).sort()).toEqual([first, first, first, first, second])
+    await poll()
+    expect(new Set(received.map(trigger => trigger.id)).size).toBe(5)
+    expect(received.filter(trigger => h.runtime.engine.candidate(trigger.id)?.strength === 'explicit')).not.toHaveLength(0)
+  })
+  it('replies once when the answer to a posted reply was lost, retries a 404, and drops a reply to a deleted or locked conversation', async () => {
+    const { h, gitea } = await source()
+    const number = gitea.issue(USERS.alice, 'Login', '@agent fix')
+    const message = { id: 'reply-1', text: 'Done.', kind: 'reply' as const,
+      channel: { source: 'gitea', thread: 'gitea:x:1', address: { server: gitea.url, repository: REPOSITORY, number: String(number) } } }
+    gitea.fail('POST', /\/comments$/, 'lost')
+    await expect(sendGitea(h.runtime, message)).rejects.toThrow('Gitea comment: no answer')
+    expect(await sendGitea(h.runtime, message)).toBe('sent')
+    expect(gitea.agentComments(number)).toHaveLength(1)
+    gitea.fail('GET', /\/comments$/, 404)
+    await expect(sendGitea(h.runtime, { ...message, id: 'reply-2' })).rejects.toThrow('HTTP 404')
+    gitea.fail('GET', /\/comments$/, 410)
+    expect(await sendGitea(h.runtime, { ...message, id: 'reply-3' })).toBe('gone')
+    gitea.lock(number)
+    expect(await sendGitea(h.runtime, { ...message, id: 'reply-4' })).toBe('gone')
+    expect(gitea.agentComments(number)).toHaveLength(1)
+  })
+  it('keeps its read position and the replies that wait across a restart, and routes a person\'s follow-up to the ticket', async () => {
+    const first = await source()
+    await first.poll()
+    first.gitea.tick(30)
+    const request = first.gitea.issue(USERS.alice, 'Login', '@agent fix the login')
+    first.gitea.tick(30)
+    await first.poll()
+    first.gitea.fail('POST', /\/comments$/, 503)
+    const ticket = await first.accept(first.received[0]!)
+    await first.h.runtime.sendReplies()
+    expect(first.gitea.agentComments(request)).toEqual([])
+    const directory = first.h.directory
+    await first.h.stop(true); h = undefined
+    first.gitea.tick(30)
+    first.gitea.comment(USERS.alice, request, 'Also the logout, please.')
+    first.gitea.tick(30)
+    const again = await source(first.gitea, directory)
+    await again.poll()
+    expect(again.received.map(trigger => trigger.text)).toEqual(['Also the logout, please.'])
+    expect(again.h.runtime.store.triggers.disposition(again.received[0]!.id)?.fanout).toEqual([ticket.id])
+    expect(again.h.runtime.store.tickets.list()).toHaveLength(1)
+    await vi.waitFor(async () => { await again.h.runtime.sendReplies(); expect(first.gitea.agentComments(request)).toHaveLength(1) }, { timeout: 20_000 })
+  })
+  it('ends the ticket when a person merges or closes its pull request, read directly every poll, and never merges itself', async () => {
+    const { h, gitea, poll, received, accept, thread } = await source()
+    await poll()
+    gitea.tick(30)
+    gitea.issue(USERS.alice, 'One', '@agent one')
+    gitea.issue(USERS.alice, 'Two', '@agent two')
+    gitea.tick(30)
+    await poll()
+    const [one, two] = [await accept(received[0]!), await accept(received[1]!)]
+    for (const ticket of [one, two]) {
+      await h.runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'progress', summary: 'PR open',
+        pr_open: { branch: `agent/${ticket.execution!.name}`, title: ticket.title, body: 'Fix.' } })
+    }
+    const pulls = [one, two].map(ticket => h.runtime.store.tickets.get(ticket.id)!.follows![0]!.thread)
+    expect(pulls).toEqual([thread(3), thread(4)])
+    gitea.tick(30)
+    gitea.merge(3)
+    gitea.close(4)
+    gitea.tick(30)
+    await poll()
+    expect(h.runtime.store.tickets.get(one.id)!.ended).toMatchObject({ outcome: 'merged' })
+    expect(h.runtime.store.tickets.get(two.id)!.ended).toMatchObject({ outcome: 'closed' })
+    expect(gitea.requests.filter(request => request.method !== 'GET' && !/\/(pulls|comments)$/.test(request.path))).toEqual([])
+  })
+  it('reads conversations for assessments and workers, page by page, marking accounts that are no person', async () => {
+    const { h, gitea } = await source()
+    const number = gitea.issue(USERS.alice, 'Login', '@agent fix')
+    for (let index = 0; index < 21; index++) gitea.comment(index ? USERS.alice : USERS.renovate, number, `comment ${index}`)
+    const api = GiteaApi.of(h.runtime.deployment)
+    expect(await readGitea(api, `gitea/issues/${number}`)).toMatchObject({ number, title: 'Login', state: 'open', from: 'alice', text: 'Login\n\n@agent fix' })
+    const page = await readGitea(api, `gitea/issues/${number}/comments/1`) as { messages: { from: string; bot?: true }[]; next_resource: string }
+    expect(page.messages).toHaveLength(20)
+    expect(page.messages[0]).toMatchObject({ from: 'renovate', bot: true })
+    expect(page.next_resource).toBe(`gitea/issues/${number}/comments/2`)
+    expect(await readGitea(api, page.next_resource)).toEqual({ messages: [expect.objectContaining({ text: 'comment 20' })] })
+    await expect(h.runtime.sources.find(`${gitea.url}/${REPOSITORY}/issues/${number}`).threads).toEqual([`gitea:${repositoryKey(gitea.url, REPOSITORY)}:${number}`])
+  })
+  it('gives tickets the Gitea variables and no GitHub ones, and leaves a GitHub Source on this host inactive', async () => {
+    const { h, gitea, poll, received, accept } = await source()
+    await poll()
+    gitea.tick(30)
+    gitea.issue(USERS.alice, 'Login', '@agent fix')
+    gitea.tick(30)
+    await poll()
+    const ticket = await accept(received[0]!)
+    const values = Object.fromEntries(h.runtime.ticketEnvironment(ticket).map(variable => [variable.key, variable.value]))
+    expect(values).toMatchObject({ DSH_SUPERAGENT_GITEA_URL: gitea.url, DSH_SUPERAGENT_GITEA_REPOSITORY: REPOSITORY, DSH_SUPERAGENT_GITEA_ACCOUNT: 'agent',
+      DSH_SUPERAGENT_GITEA_NUMBER: '1', DSH_SUPERAGENT_GITEA_PR_HEAD: '' })
+    expect(Object.values(values).join('\n')).not.toContain(TOKEN)
+    expect(Object.entries(values).filter(([name, value]) => name.startsWith('DSH_SUPERAGENT_GITHUB_') && value)).toEqual([])
+    applyGithub({ orchestrator: { sources: { register: () => () => {} }, context: (kind: never) => h.runtime.context(kind) }, effect: (effect: () => unknown) => { effect() } } as never)
+    await vi.waitFor(() => expect(h.runtime.health.github).toMatchObject({ state: 'paused', code: 'notBound', values: { host: 'gitea' } }))
   })
 })
