@@ -1,0 +1,91 @@
+{
+  "at": "2026-11-02T10:34:13.030Z",
+  "server": "http://127.0.0.1:63847",
+  "repository": "pilot-owner/issue-3-final",
+  "setup": {
+    "host": "gitea",
+    "version": "28.3.0",
+    "repository": "pilot-owner/issue-3-final",
+    "account": "pilot-agent",
+    "gitScope": "http://127.0.0.1:63847/pilot-owner/issue-3-final.git",
+    "helperIsBundled": true
+  },
+  "intake": [
+    {
+      "actor": "pilot-owner",
+      "human": true,
+      "verdict": "explicit"
+    },
+    {
+      "actor": "pilot-stranger",
+      "human": true,
+      "verdict": "not_a_member"
+    }
+  ],
+  "duplicatePoll": {
+    "replayed": [
+      "duplicate",
+      "duplicate"
+    ],
+    "tickets": 1
+  },
+  "pullRequest": {
+    "pushedBranch": "agent/greeting-915d99c5080d",
+    "number": 2,
+    "adoptedOnRepeat": true,
+    "follows": [
+      {
+        "thread": "gitea:869692358ead:2",
+        "own": true
+      }
+    ]
+  },
+  "restart": {
+    "cursorKeptAcrossRestart": true,
+    "cursorMovedSinceStart": true,
+    "followUpReachedTicket": true,
+    "tickets": 1
+  },
+  "replies": {
+    "inOriginalConversation": [
+      "On it: changing the greeting.",
+      "Should the greeting say hello or hi?",
+      "Done: the greeting says hello; the PR waits for review."
+    ],
+    "resentWithoutDuplicate": true
+  },
+  "terminal": {
+    "merged": {
+      "pull": 2,
+      "ticket": "merged"
+    },
+    "closed": {
+      "pull": 4,
+      "ticket": "closed"
+    },
+    "agentPullsOfThisRun": [
+      {
+        "number": 4,
+        "state": "closed",
+        "merged": false,
+        "author": "pilot-agent"
+      },
+      {
+        "number": 2,
+        "state": "closed",
+        "merged": true,
+        "author": "pilot-agent"
+      }
+    ]
+  },
+  "testedCommit": "a38f26f64c857303cef8966320bd01dd9b8c5759",
+  "method": "Real Gitea HTTP and Git with deterministic simulated DSH agents; no model call.",
+  "configuration": {
+    "repositoryHost": "gitea",
+    "agentAccountType": "Bot",
+    "tokenStorage": "owner-only file, path and contents omitted",
+    "githubConfigured": false,
+    "feishuConfigured": false
+  },
+  "internalServer": "Not checked. Follow-up issue 6."
+}
