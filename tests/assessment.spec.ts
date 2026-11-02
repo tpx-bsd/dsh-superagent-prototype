@@ -9,6 +9,7 @@ import { SettingsSchema } from '../src/policy.ts'
 import { testDeployment } from './fixtures/deployment.ts'
 import { deferred } from './fixtures/async.ts'
 import { githubKind } from '../src/sources/github.ts'
+import { githubHost } from '../src/sources/github-host.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 
 /** Assessor fixture backed by in-memory repositories and fake GitHub Issue and file reads. */
@@ -37,7 +38,7 @@ function setup(strength: 'explicit' | 'inferred' = 'inferred', bodies = Array.fr
   sources.register(githubKind)
   let engine!: Engine
   const host: AssessorHost = {
-    get engine() { return engine }, commands, deployment: testDeployment(), settings: () => SettingsSchema.parse({}),
+    get engine() { return engine }, commands, deployment: testDeployment(), repository: githubHost, settings: () => SettingsSchema.parse({}),
     threadContext: threadContext ?? (trigger => sources.threadContext(trigger)),
     effects: { enqueue: () => {}, handle: () => {} }, paused: () => false, deliver: async () => {}, candidateCard: async candidate => ({ eval_id: candidate.evalId }),
   }

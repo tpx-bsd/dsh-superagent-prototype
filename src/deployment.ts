@@ -1,4 +1,4 @@
-/** Plugin configuration and startup verification for repository access and agent CLI identities. */
+/** Plugin configuration, the data setup resolves for the repository host and the Feishu bot, and the CLI probes setup runs. */
 import { LIMITS } from './limits.ts'
 import { accessSync, constants, statSync } from 'node:fs'
 import { delimiter, isAbsolute, join } from 'node:path'
@@ -9,7 +9,7 @@ import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import { runAsWorker, sameDirectory, withoutDirectory, workerBin } from './infra/environment.ts'
 import { SetupError } from './setup.ts'
 
-const reason = (error: unknown): string => error instanceof Error ? error.message : String(error)
+export const reason = (error: unknown): string => error instanceof Error ? error.message : String(error)
 const absolute = (description: string) => s.string().pattern(/^\//).description(`${description} Absolute path.`)
 /** Plugin configuration of the dsh-superagent entry. Volatile fields apply without a restart because dsh-superagent reads them on each use; changing `stateDir` remounts the plugin. */
 export const Config = s.object({
@@ -50,11 +50,16 @@ export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
 /** Source configuration keys that affect deployment setup and trigger a restart when changed. */
 export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = { github: Object.keys(GithubAccountsSchema.shape), feishu: Object.keys(FeishuBotSchema.shape) }
 
-export interface Deployment extends Machine {
-  repository: string
-  github: { cli: string; login: string; noreply: string }
-  feishu?: FeishuBot
-}
+/** The agent's account on the repository host. Workers run its `cli` as `command`, and commit as `commitEmail`. */
+export interface Account { command: string; cli: string; login: string; commitEmail: string }
+/**
+ * How the agent's git reaches the repository host. Setup writes it into the worker git configuration and checks that git reads it:
+ * `helper` answers credentials for `origin`, and addresses starting with an `insteadOf` prefix are rewritten to `origin/`.
+ */
+export interface GitAccess { origin: string; helper: string; insteadOf: readonly string[] }
+/** What a repository host resolves at setup: the canonical `owner/name`, the agent's account and its git access. Rebuilt on every start, never stored. */
+export interface RepositoryAccess { repository: string; account: Account; git: GitAccess }
+export interface Deployment extends Machine, RepositoryAccess { feishu?: FeishuBot }
 export interface FeishuBot { cli: string; appId: string; brand: 'feishu' | 'lark'; botId: string; name: string }
 
 /** Resolve a command name or absolute path to an executable file, ignoring the worker shim directory. */
@@ -75,34 +80,12 @@ export function workerProbe(subprocess: SubprocessRuntime, stateDir: string, cwd
   return argv => runAsWorker(subprocess, ['env', `PATH=${path}`, ...argv], cwd, AbortSignal.any([signal, AbortSignal.timeout(60_000)]))
 }
 
-const GithubUser = z.object({ login: z.string().regex(/^[A-Za-z0-9-]+$/), id: z.number().int().positive() })
-const RepositoryAccess = z.object({ name: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/), push: z.boolean().nullable() })
-function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
+/** Parses CLI output as JSON of `schema`, or `undefined` when it is not. */
+export function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
   let value: unknown
   try { value = JSON.parse(text) } catch { return undefined /* Non-JSON output; the caller surfaces the setup failure. */ }
   const result = schema.safeParse(value)
   return result.success ? result.data : undefined
-}
-/** Verify the agent's GitHub CLI identity and push access to the configured repository. */
-export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
-  const { stateDir } = machine
-  const accounts = GithubAccountsSchema.parse(github ?? {})
-  const remote = accounts.repository
-  if (!remote) throw new SetupError('repositoryUnset')
-  if (!accounts.cli) throw new SetupError('agentCliUnset')
-  let cli: string
-  try { cli = executable(accounts.cli, path, workerBin(stateDir)) } catch (error) { throw new SetupError('agentCliMissing', { output: reason(error) }) }
-  const text = await probe([cli, 'api', 'user']).catch((error: unknown) => { throw new SetupError('agentCliSignedOut', { output: reason(error) }) })
-  const agent = parsed(GithubUser, text)
-  if (!agent) throw new SetupError('agentCliNoAccount')
-  // Use the canonical repository name returned by GitHub so renamed repositories match incoming notifications.
-  const access = parsed(RepositoryAccess, await probe([cli, 'api', `repos/${remote}`, '--jq', '{name: .full_name, push: .permissions.push}']).catch((error: unknown) => {
-    throw new SetupError('repositoryUnreadable', { account: agent.login, repository: remote, output: reason(error) })
-  }))
-  if (!access) throw new SetupError('repositoryUnreported', { repository: remote })
-  const repository = access.name
-  if (access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
-  return { ...machine, repository, github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }
 }
 
 const AuthStatus = z.object({ appId: z.string().regex(/^cli_[A-Za-z0-9]+$/), brand: z.enum(['feishu', 'lark']).default('feishu'), identities: z.object({ bot: z.object({ status: z.string() }) }) })

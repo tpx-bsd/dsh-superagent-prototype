@@ -1,15 +1,18 @@
 /** Probes repository and account CLIs, configures the worker execution environment and command shims, and tracks setup readiness. */
 import type { Context } from '@deepseek-ai/cordis'
 import { UserError } from '../core/index.ts'
-import { SETUP_FIELDS, resolveDeployment, resolveFeishuBot, workerProbe, type Deployment, type Machine } from '../deployment.ts'
+import { SETUP_FIELDS, resolveFeishuBot, workerProbe, type Deployment, type Machine } from '../deployment.ts'
 import { agentVariables, applyEnvironment, verifyEnvironment, withoutDirectory, workerBin, writeEnvironment } from '../infra/environment.ts'
 import type { Settings, SettingsBlock } from '../policy.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
+import type { RepositoryHost } from '../sources/host.ts'
 
 export interface SetupHost {
   readonly context: Context
   readonly machine: Machine
   readonly lifetime: AbortSignal
+  /** The repository host whose account setup checks and whose git access it writes. */
+  readonly repository: Pick<RepositoryHost, 'source' | 'resolve'>
   restart(): void
 }
 
@@ -18,7 +21,7 @@ const setupFields = (settings: Settings) =>
 export const setupChanged = (before: Settings, after: Settings): boolean => setupFields(before) !== setupFields(after)
 
 /**
- * Resolves the target repository, GitHub account, and optional Feishu bot by probing CLIs, then writes and applies the isolated git and shim environment used by worker processes.
+ * Resolves the target repository and account through the repository host, and the optional Feishu bot, by probing CLIs, then writes and applies the isolated git and shim environment used by worker processes.
  * `Runtime` runs it at startup to gate orchestration readiness, while `Settings` uses it to validate account changes, update blocked command shims, and schedule restarts.
  */
 export class Setup {
@@ -59,9 +62,9 @@ export class Setup {
   restart(): void { setTimeout(this.host.restart, 0) }
   /** Verify account CLIs for a modified source block before saving, ignoring setup errors belonging to other blocks. */
   async checkAccounts(block: SettingsBlock, settings: Settings): Promise<void> {
-    const { machine } = this.host
+    const { machine, repository } = this.host
     const check = block === 'source:feishu' ? resolveFeishuBot(machine, settings.sources.feishu?.config, this.probe())
-      : resolveDeployment(machine, settings.sources.github?.config, this.probe())
+      : repository.resolve(machine, settings.sources[repository.source.kind]?.config, this.probe())
     await check.catch((error: unknown) => { if (!(error instanceof SetupError) || error.place === block.slice(7)) throw error })
   }
   async blockCommands(blocked: readonly string[]): Promise<void> {
@@ -74,16 +77,16 @@ export class Setup {
     return workerProbe(context.subprocess, machine.stateDir, machine.stateDir, lifetime)
   }
   private async resolve(settings: Settings): Promise<Deployment> {
-    const { context, machine, lifetime } = this.host
+    const { context, machine, lifetime, repository } = this.host
     const probe = this.probe()
-    const deployment = await resolveDeployment(machine, settings.sources.github?.config, probe)
+    const access = await repository.resolve(machine, settings.sources[repository.source.kind]?.config, probe)
     const feishu = await resolveFeishuBot(machine, settings.sources.feishu?.config, probe).catch((error: unknown) => {
       if (!(error instanceof SetupError)) throw error
       this.feishuProblem = error.problem
       context.logger.warn('dsh-superagent leaves Feishu out: %s', error.message)
       return undefined
     })
-    const resolved = { ...deployment, ...(feishu ? { feishu } : {}) }
+    const resolved: Deployment = { ...machine, ...access, ...(feishu ? { feishu } : {}) }
     const machineProblem = (error: unknown): never => {
       if (error instanceof SetupError) throw error
       throw new SetupError('environmentFailed', { output: error instanceof Error ? error.message : String(error) })

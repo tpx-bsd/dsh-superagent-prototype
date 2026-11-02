@@ -1,7 +1,7 @@
 /** Host and context interfaces connecting Source plugins to the application; also imported by the web panel, so it must not import Node-only modules. */
 import type { ChannelRef, ReceiveResult, OutboundMessage, Thread, ThreadFact, ThreadRef, Ticket, Trigger } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
-import type { Deployment } from '../deployment.ts'
+import type { Deployment, Machine, Probe, RepositoryAccess } from '../deployment.ts'
 import type { SourceRegistry } from './registry.ts'
 import type { SetupProblem } from '../setup.ts'
 import type { Family, Key } from '../kv.ts'
@@ -65,3 +65,26 @@ export interface SourceContext {
   report(entry: string, health: Health): void
 }
 export const sourceContext = (host: SourceHost, kind: { kind: string; health: readonly string[] }): SourceContext => host.context(kind)
+/**
+ * The repository host the deployment binds, GitHub today. Runtime holds one and passes it to setup, the assessor, the Executor
+ * tools and the end notices, so shared code names no host.
+ */
+export interface RepositoryHost {
+  /** The Source it binds, as `SourceHost.context` takes it; `kind` also names its settings block, its `SETUP_FIELDS` and its built-in skill. */
+  readonly source: { readonly kind: string; readonly health: readonly string[] }
+  /**
+   * Checks the account CLI and its push access to the configured repository, and returns the canonical repository with the account
+   * and its git access.
+   * @throws SetupError placed at the Source's kind
+   */
+  resolve(machine: Pick<Machine, 'stateDir'>, config: unknown, probe: Probe, path?: string): Promise<RepositoryAccess>
+  /** A non-hidden file, or a directory's listing, on the default branch of the configured repository. */
+  readPath(commands: Commands, path: string, kind: 'file' | 'directory'): Promise<string>
+  /**
+   * Reads a pull request a worker reported. The claim it returns is synchronous so the caller runs it inside its `atomic`; the claim
+   * binds the pull request to the Ticket and answers nothing, or answers why it does not belong to the Ticket.
+   */
+  pullClaim(ctx: SourceContext, ticketId: string, number: number, signal?: AbortSignal): Promise<() => string | undefined>
+  /** The chat notices of a Ticket that ended with its pull request merged or closed. */
+  pullEndNotices(ticket: Ticket, request: string, repository: string): OutboundMessage[]
+}

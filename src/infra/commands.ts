@@ -1,4 +1,4 @@
-/** Subprocess wrapper for running gh, lark-cli, and git commands under the deployment's configured accounts. */
+/** Subprocess wrapper for running the account CLI, lark-cli, and git commands under the deployment's configured accounts. */
 import { execFile } from 'node:child_process'
 import { basename } from 'node:path'
 import { promisify } from 'node:util'
@@ -53,8 +53,9 @@ function membership(error: unknown): unknown {
   return new CliError(hint, error.code, error.exitCode)
 }
 /**
- * Executes gh, lark-cli, and git subprocesses with deployment account credentials, timeouts, and abort signals.
- * Restricts GitHub API calls to the configured repository and translates CLI failures into CliError instances for Sources, MasterAssessor, Outbox, and Settings.
+ * Executes the account CLI, lark-cli, and git subprocesses with deployment account credentials, timeouts, and abort signals.
+ * `gh`, `api` and `pages` are the GitHub Source's transport, restricted to the configured repository; shared code reads the repository
+ * through `RepositoryHost`. Translates CLI failures into CliError instances for Sources, MasterAssessor, Outbox, and Settings.
  */
 export class Commands {
   /**
@@ -73,7 +74,7 @@ export class Commands {
     } catch (error) { throw commandError(error, program) }
   }
   /** Runs the agent's GitHub CLI and parses its JSON output; callers should prefer `api`, which is restricted to the configured repository and validates output. */
-  async gh<T>(args: string[]): Promise<T> { return JSON.parse(await this.run(this.deployment.github.cli, args)) as T }
+  async gh<T>(args: string[]): Promise<T> { return JSON.parse(await this.run(this.deployment.account.cli, args)) as T }
   /**
    * Calls the GitHub API on a path within the configured repository, validating JSON output when a schema is provided
    * or returning raw CLI output (such as raw files or `--include` headers) when omitted.
@@ -82,7 +83,7 @@ export class Commands {
   async api<T>(schema: z.ZodType<T>, path: string, ...flags: string[]): Promise<T>
   async api(path: string, ...flags: string[]): Promise<string>
   async api<T>(schema: z.ZodType<T> | string, ...rest: string[]): Promise<T | string> {
-    if (typeof schema === 'string') return this.run(this.deployment.github.cli, ['api', this.path(schema), ...rest])
+    if (typeof schema === 'string') return this.run(this.deployment.account.cli, ['api', this.path(schema), ...rest])
     const [path = '', ...flags] = rest
     return schema.parse(await this.gh(['api', this.path(path), ...flags]))
   }
