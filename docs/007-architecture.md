@@ -377,6 +377,9 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/github-pull.ts` | GitHub's pull request reads, and the shared rules applied to the `github:<number>` Threads |
 | `src/sources/github-channel.ts` | The GitHub Channel: comments and review thread replies, `sent` or `gone` |
 | `src/sources/github-read.ts` | CI snapshots, repository reads, the `github/` resources, and `githubThreadContext`: an Issue's or pull request's conversation by page |
+| `src/sources/gitea-api.ts` | `GiteaApi`, the Gitea Source's transport and the only module that sends Gitea requests: the configured repository's records parsed into `GiteaIssue`, `GiteaComment`, `GiteaPull` and `GiteaUser`, every page of a list, and `GiteaError`, which names the operation and the status and never an answer's body or the token; `giteaServer` and `repositoryKey` |
+| `src/sources/gitea-token.ts` | `readToken`: the token from a regular file of this OS user that no one else may access |
+| `src/sources/gitea-credential.ts` | The git credential helper of a Gitea deployment, built as `lib/gitea-credential.js`: the token on git's pipe for exactly one repository URL |
 | `src/sources/feishu.ts` | The Feishu kind and plugin entry, exported as `./feishu-watch` |
 | `src/sources/feishu-trigger.ts` | Feishu messages as Triggers, by one rule for live events, history pages and topic pages |
 | `src/sources/feishu-loops.ts` | The Feishu loops: the event consumer, history recovery, chat names and polling of subscribed topics |
@@ -419,6 +422,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/registry.spec.ts` | `SourceRegistry`: instances, validation, Policy parts, Channels and Thread context |
 | `tests/sources.spec.ts` | The Feishu and GitHub Sources on a `SourceContext`: translation, polls and read positions, the pull request rules, health |
 | `tests/commands.spec.ts` | CLI calls as the deployment's accounts, the Channels' answers, and repository-scoped GitHub calls |
+| `tests/gitea-api.spec.ts` | `GiteaApi` against a stand-in server: paging that ignores limits or pages, errors without bodies, no redirect, the private token file, and the credential helper's exact repository scope |
 | `tests/feishu-read.spec.ts`, `tests/github-read.spec.ts` | Feishu and GitHub reads |
 | `tests/admission-context.spec.ts`, `tests/feishu-image.spec.ts` | The Thread window of assessments, and Feishu image reads |
 | `tests/assessment.spec.ts` | What the MasterAssessor keeps per Eval, and when it lets go |
