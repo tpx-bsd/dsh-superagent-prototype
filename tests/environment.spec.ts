@@ -16,9 +16,9 @@ vi.setConfig({ testTimeout: 30_000 })
 const exec = promisify(execFile)
 let dir: string
 const program = (path: string, body: string): string => { writeFileSync(path, `#!/bin/sh\n${body}\n`); chmodSync(path, 0o755); return path }
-/** Worker shell environment after DSH strips credential-shaped variables. */
+/** Worker shell environment after DSH strips credential-shaped variables, with git's messages in English whatever the machine's locale. */
 const workerEnv = (env: Record<string, string | undefined>): Record<string, string> =>
-  Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined && !SENSITIVE_ENV_PATTERN.test(entry[0])))
+  Object.fromEntries(Object.entries({ ...env, LC_ALL: 'C' }).filter((entry): entry is [string, string] => entry[1] !== undefined && !SENSITIVE_ENV_PATTERN.test(entry[0])))
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'environment-')); mkdirSync(join(dir, 'real')) })
 afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
@@ -60,6 +60,25 @@ describe('worker shims', () => {
     writeFileSync(workerGitConfig(dir), '[user]\n\tname = someone\n')
     await expect(writeEnvironment(testDeployment({ stateDir: dir }), [])).rejects.toThrow(`${workerGitConfig(dir)} was not written by dsh-superagent`)
     expect(readFileSync(workerGitConfig(dir), 'utf8')).toBe('[user]\n\tname = someone\n')
+  })
+  it('writes the GitHub agent\'s shims and git configuration byte for byte as before', async () => {
+    await writeEnvironment(testDeployment({ stateDir: dir }), ['personal-gh'])
+    const bin = workerBin(dir)
+    const marker = '# Written by dsh-superagent on every start; edits are lost.'
+    const run = [`#!/bin/sh`, marker, `self='${bin}'`, 'rest=', 'IFS=:', 'set -f',
+      'for entry in $PATH; do [ "$entry" = "$self" ] || rest="${rest:+$rest:}$entry"; done',
+      'set +f', 'unset IFS', 'PATH=$rest', 'export PATH', `exec '/bin/false' "$@"`, ''].join('\n')
+    expect(readdirSync(bin).sort()).toEqual(['gh', 'lark-cli', 'personal-gh'])
+    expect(readFileSync(join(bin, 'gh'), 'utf8')).toBe(run)
+    expect(readFileSync(join(bin, 'lark-cli'), 'utf8')).toBe(run)
+    expect(readFileSync(join(bin, 'personal-gh'), 'utf8'))
+      .toBe(`#!/bin/sh\n${marker}\necho 'personal-gh is blocked in this installation; use gh, which acts as agent-bot.' >&2\nexit 1\n`)
+    expect(readFileSync(workerGitConfig(dir), 'utf8')).toBe([marker,
+      '[user]', '\tuseConfigOnly = true',
+      '[credential]', '\thelper =',
+      '[credential "https://github.com"]', `\thelper = "!'/bin/false' auth git-credential"`,
+      '[url "https://github.com/"]', '\tinsteadOf = git@github.com:', '\tinsteadOf = ssh://git@github.com/',
+      '[filter "lfs"]', '\tclean = git-lfs clean -- %f', '\tsmudge = git-lfs smudge -- %f', '\tprocess = git-lfs filter-process', '\trequired = true', ''].join('\n'))
   })
   it('replaces the files it wrote under the project\'s earlier names', async () => {
     await writeEnvironment(testDeployment({ stateDir: dir }), ['old-cli', 'older-cli'])
