@@ -8,7 +8,7 @@ import { checkedImText } from '../infra/text.ts'
 import type { Commands } from '../infra/commands.ts'
 import type { Deployment } from '../deployment.ts'
 import { admissionContext } from '../sources/admission-context.ts'
-import { readRepositoryPath } from '../sources/github-read.ts'
+import type { RepositoryHost } from '../sources/host.ts'
 import type { TriggerContext } from '../sources/kind.ts'
 import { relatedTickets } from './cards.ts'
 import { textPage } from './context.ts'
@@ -51,6 +51,7 @@ export interface AssessorHost {
   readonly engine: Pick<EngineForMainSession, 'candidate' | 'candidateDelivered' | 'decide'>
   readonly commands: Commands
   readonly deployment: Deployment
+  readonly repository: Pick<RepositoryHost, 'readPath'>
   /** Durable effect queue through which candidate assessments are delivered. */
   readonly effects: Pick<Effects, 'enqueue' | 'handle'>
   settings(): Settings
@@ -263,7 +264,7 @@ export class MasterAssessor implements Assessor {
         body = JSON.stringify({ images: references, next_read: next, ...result.body })
       }
       else {
-        body = await readRepositoryPath(commands, read.path!, read.resource === 'directory' ? 'directory' : 'file')
+        body = await this.host.repository.readPath(commands, read.path!, read.resource === 'directory' ? 'directory' : 'file')
       }
       snapshots.set(cacheKey, body)
       return textPage(read.resource, body, read.offset, 4000)

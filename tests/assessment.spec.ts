@@ -9,17 +9,19 @@ import { SettingsSchema } from '../src/policy.ts'
 import { testDeployment } from './fixtures/deployment.ts'
 import { deferred } from './fixtures/async.ts'
 import { githubKind } from '../src/sources/github.ts'
+import { githubHost } from '../src/sources/github-host.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 
 /** Assessor fixture backed by in-memory repositories and fake GitHub Issue and file reads. */
 function setup(strength: 'explicit' | 'inferred' = 'inferred', bodies = Array.from({ length: 5 }, (_, i) => `comment ${i}`),
-  threadContext?: AssessorHost['threadContext']) {
+  threadContext?: AssessorHost['threadContext'], repository: AssessorHost['repository'] = githubHost) {
   const comments = bodies.map((body, i) => ({ id: i, html_url: `https://github.com/acme/widgets/issues/1#c${i}`,
     user: { login: 'bob' }, created_at: '2026-09-09T00:00:00Z', body }))
   const gate = { issue: undefined as Promise<void> | undefined }
+  const signals: AbortSignal[] = []
   const commands = {
     repository: 'acme/widgets', deployment: testDeployment(),
-    withSignal() { return commands },
+    withSignal(signal: AbortSignal) { signals.push(signal); return commands },
     gh: vi.fn(async (args: string[]) => {
       await gate.issue
       const number = Number(/issues\/(\d+)/.exec(args[1]!)?.[1])
@@ -37,7 +39,7 @@ function setup(strength: 'explicit' | 'inferred' = 'inferred', bodies = Array.fr
   sources.register(githubKind)
   let engine!: Engine
   const host: AssessorHost = {
-    get engine() { return engine }, commands, deployment: testDeployment(), settings: () => SettingsSchema.parse({}),
+    get engine() { return engine }, commands, deployment: testDeployment(), repository, settings: () => SettingsSchema.parse({}),
     threadContext: threadContext ?? (trigger => sources.threadContext(trigger)),
     effects: { enqueue: () => {}, handle: () => {} }, paused: () => false, deliver: async () => {}, candidateCard: async candidate => ({ eval_id: candidate.evalId }),
   }
@@ -57,7 +59,7 @@ function setup(strength: 'explicit' | 'inferred' = 'inferred', bodies = Array.fr
   // Per-Eval state retained by the assessor and released when the Eval ends.
   const kept = assessor as unknown as { evals: Map<string, unknown> }
   const size = () => kept.evals.size
-  return { repo, engine, assessor, tools, size, gate }
+  return { repo, engine, assessor, tools, size, gate, signals }
 }
 const issue = (n: number): Trigger => ({ id: `issue-${n}`, source: 'github', threads: [{ source: 'github', id: String(n) }], actor: { source: 'github', id: 'bob' }, human: true,
   at: new Date(Date.UTC(2026, 8, 9, 0, 0, n)).toISOString(), text: `issue ${n}`, url: `https://github.com/acme/widgets/issues/${n}`, meta: { number: n } })
@@ -180,4 +182,20 @@ it('lets the main Session read on from the cursor its loaded window ends with, a
   s2.engine.receive(long); s2.engine.receive({ ...issue(3), threads: issue(1).threads }); s2.engine.evaluateDue()
   const other = await s2.assessor.context('issue-3', signal) as { batch: Record<string, unknown>[] }
   expect(other.batch).toEqual([expect.objectContaining({ trigger_id: 'long', chars: long.text.length, read: 'trigger/long' })])
+})
+
+it('reads repository files and directories through the repository host it is given, with the caller\'s cancel', async () => {
+  const hold = deferred()
+  const readPath = vi.fn(async (_commands: Commands, path: string, kind: string) => { await hold.promise; return `${kind} ${path} from the stand-in host` })
+  const s = setup('inferred', undefined, undefined, { readPath })
+  s.engine.receive(issue(1)); s.engine.evaluateDue()
+  const cancel = new AbortController()
+  const reading = s.tools.orchestrator_eval_read!({ trigger_id: 'issue-1', resource: 'directory', path: 'src', offset: 0 }, cancel.signal)
+  await vi.waitFor(() => { expect(readPath).toHaveBeenCalledWith(expect.anything(), 'src', 'directory') })
+  cancel.abort()
+  expect(s.signals.at(-1)!.aborted).toBe(true)
+  hold.resolve()
+  expect(await reading).toMatchObject({ text: 'directory src from the stand-in host' })
+  expect(await s.tools.orchestrator_eval_read!({ trigger_id: 'issue-1', resource: 'file', path: 'README.md', offset: 0 }, signal))
+    .toMatchObject({ text: 'file README.md from the stand-in host' })
 })

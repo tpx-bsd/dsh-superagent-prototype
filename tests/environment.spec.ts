@@ -5,10 +5,11 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SENSITIVE_ENV_PATTERN, type SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
-import { GIT_LOCATION, agentVariables, credentialHelper, runAsWorker, verifyDirectory, withoutDirectory, workerBin, workerGitConfig, writeEnvironment }
+import { GIT_LOCATION, agentVariables, runAsWorker, verifyDirectory, withoutDirectory, workerBin, workerGitConfig, writeEnvironment }
   from '../src/infra/environment.ts'
 import { CliError } from '../src/infra/commands.ts'
-import { testDeployment } from './fixtures/deployment.ts'
+import { credentialHelper } from '../src/sources/github-host.ts'
+import { githubAccess, testDeployment } from './fixtures/deployment.ts'
 import { gitEnv } from './fixtures/git.ts'
 
 // Git and shell subprocesses can exceed the 5s default timeout when the test suite runs in parallel.
@@ -18,7 +19,7 @@ let dir: string
 const program = (path: string, body: string): string => { writeFileSync(path, `#!/bin/sh\n${body}\n`); chmodSync(path, 0o755); return path }
 /** Worker shell environment after DSH strips credential-shaped variables. */
 const workerEnv = (env: Record<string, string | undefined>): Record<string, string> =>
-  Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined && !SENSITIVE_ENV_PATTERN.test(entry[0])))
+  Object.fromEntries(Object.entries({ ...env, LC_ALL: 'C' }).filter((entry): entry is [string, string] => entry[1] !== undefined && !SENSITIVE_ENV_PATTERN.test(entry[0])))
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'environment-')); mkdirSync(join(dir, 'real')) })
 afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
@@ -26,7 +27,7 @@ describe('worker shims', () => {
   it('run a wrapper that calls `gh` by name without reaching the shim again, and keep the caller\'s other PATH entries', async () => {
     program(join(dir, 'real', 'gh'), 'echo "{\\"login\\":\\"agent-bot\\",\\"config\\":\\"$GH_CONFIG_DIR\\",\\"path\\":\\"$PATH\\"}"')
     const wrapper = program(join(dir, 'gh-agent'), `GH_CONFIG_DIR=${dir}/agent-config exec gh "$@"`)
-    await writeEnvironment(testDeployment({ stateDir: dir, github: { ...testDeployment().github, cli: wrapper }, feishu: undefined }), [])
+    await writeEnvironment(testDeployment({ stateDir: dir, ...githubAccess(wrapper), feishu: undefined }), [])
     const bin = workerBin(dir)
     const path = [bin, join(dir, 'venv'), join(dir, 'real'), '/usr/bin', '/bin'].join(':')
     const { stdout } = await exec('gh', ['api', 'user'], { env: { PATH: path }, timeout: 10_000 })
@@ -41,7 +42,7 @@ describe('worker shims', () => {
   it('keep `gh` and `lark-cli` working, and shim no `git`, when the blocked commands name the commands workers need', async () => {
     const gh = program(join(dir, 'gh-agent'), 'echo gh "$@"'), lark = program(join(dir, 'lark-bot'), 'echo lark "$@"')
     const base = testDeployment()
-    await writeEnvironment(testDeployment({ stateDir: dir, github: { ...base.github, cli: gh }, feishu: { ...base.feishu!, cli: lark } }), ['gh', 'git', 'lark-cli'])
+    await writeEnvironment(testDeployment({ stateDir: dir, ...githubAccess(gh), feishu: { ...base.feishu!, cli: lark } }), ['gh', 'git', 'lark-cli'])
     const bin = workerBin(dir)
     expect([(await exec(join(bin, 'gh'), ['api', 'user'])).stdout, (await exec(join(bin, 'lark-cli'), ['im'])).stdout]).toEqual(['gh api user\n', 'lark im\n'])
     expect(readdirSync(bin)).not.toContain('git')
@@ -61,6 +62,25 @@ describe('worker shims', () => {
     await expect(writeEnvironment(testDeployment({ stateDir: dir }), [])).rejects.toThrow(`${workerGitConfig(dir)} was not written by dsh-superagent`)
     expect(readFileSync(workerGitConfig(dir), 'utf8')).toBe('[user]\n\tname = someone\n')
   })
+  it('writes the GitHub agent\'s shims and git configuration byte for byte as before', async () => {
+    await writeEnvironment(testDeployment({ stateDir: dir }), ['personal-gh'])
+    const bin = workerBin(dir)
+    const marker = '# Written by dsh-superagent on every start; edits are lost.'
+    const run = [`#!/bin/sh`, marker, `self='${bin}'`, 'rest=', 'IFS=:', 'set -f',
+      'for entry in $PATH; do [ "$entry" = "$self" ] || rest="${rest:+$rest:}$entry"; done',
+      'set +f', 'unset IFS', 'PATH=$rest', 'export PATH', `exec '/bin/false' "$@"`, ''].join('\n')
+    expect(readdirSync(bin).sort()).toEqual(['gh', 'lark-cli', 'personal-gh'])
+    expect(readFileSync(join(bin, 'gh'), 'utf8')).toBe(run)
+    expect(readFileSync(join(bin, 'lark-cli'), 'utf8')).toBe(run)
+    expect(readFileSync(join(bin, 'personal-gh'), 'utf8'))
+      .toBe(`#!/bin/sh\n${marker}\necho 'personal-gh is blocked in this installation; use gh, which acts as agent-bot.' >&2\nexit 1\n`)
+    expect(readFileSync(workerGitConfig(dir), 'utf8')).toBe([marker,
+      '[user]', '\tuseConfigOnly = true',
+      '[credential]', '\thelper =',
+      '[credential "https://github.com"]', `\thelper = "!'/bin/false' auth git-credential"`,
+      '[url "https://github.com/"]', '\tinsteadOf = git@github.com:', '\tinsteadOf = ssh://git@github.com/',
+      '[filter "lfs"]', '\tclean = git-lfs clean -- %f', '\tsmudge = git-lfs smudge -- %f', '\tprocess = git-lfs filter-process', '\trequired = true', ''].join('\n'))
+  })
   it('replaces the files it wrote under the project\'s earlier names', async () => {
     await writeEnvironment(testDeployment({ stateDir: dir }), ['old-cli', 'older-cli'])
     const legacy = (file: string, name: string) => writeFileSync(file, readFileSync(file, 'utf8').replace('Written by dsh-superagent', `Written by ${name}`))
@@ -76,7 +96,7 @@ describe('agent git configuration', () => {
     const home = join(dir, 'home'); mkdirSync(home)
     // Operator configuration that rewrites HTTPS to SSH, enables commit signing, and sets a credential helper.
     writeFileSync(join(home, '.gitconfig'), '[url "git@github.com:"]\n\tinsteadOf = https://github.com/\n[commit]\n\tgpgsign = true\n[credential]\n\thelper = osxkeychain\n')
-    const deployment = testDeployment({ stateDir: dir, github: { ...testDeployment().github, cli: '/opt/agent tools/gh' } })
+    const deployment = testDeployment({ stateDir: dir, ...githubAccess('/opt/agent tools/gh') })
     await writeEnvironment(deployment, [])
     // Operator identity variables and git's fallback from the OS username must not apply to worker commits.
     const env = workerEnv({ PATH: process.env.PATH, HOME: home, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.abbrev', GIT_CONFIG_VALUE_0: '12', GIT_AUTHOR_NAME: 'Operator', GIT_COMMITTER_EMAIL: 'operator@example.com', ...agentVariables(dir) })
@@ -100,7 +120,7 @@ it('fails instead of asking the operator\'s askpass helpers when the agent\'s cr
   const log = join(dir, 'asked')
   const askpass = program(join(dir, 'askpass'), `echo asked >> ${log}; echo operator-secret`)
   const agent = program(join(dir, 'real', 'gh'), 'exit 0')
-  const deployment = testDeployment({ stateDir: dir, github: { ...testDeployment().github, cli: agent } })
+  const deployment = testDeployment({ stateDir: dir, ...githubAccess(agent) })
   await writeEnvironment(deployment, [])
   const env = workerEnv({ PATH: process.env.PATH, HOME: dir, GIT_ASKPASS: askpass, SSH_ASKPASS: askpass, ...agentVariables(dir) })
   await exec('git', ['init', '-q', 'repo'], { cwd: dir, env })

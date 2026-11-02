@@ -14,7 +14,9 @@ import { SettingsSchema } from '../../src/policy.ts'
 import { feishuKind, feishuTrigger } from '../../src/sources/feishu.ts'
 import { githubKind } from '../../src/sources/github.ts'
 import { Commands } from '../../src/infra/commands.ts'
-import { credentialHelper, workerGitConfig } from '../../src/infra/environment.ts'
+import { workerGitConfig } from '../../src/infra/environment.ts'
+import { credentialHelper } from '../../src/sources/github-host.ts'
+import type { RepositoryHost } from '../../src/sources/host.ts'
 import type { Trigger } from '../../src/core/index.ts'
 import { testMachine } from './deployment.ts'
 
@@ -132,7 +134,7 @@ export function subagentRuntime(agents: Map<string, FakeAgent>) {
 }
 
 /** @param seed - writes to the database before the Runtime opens it, such as records an earlier version stored. */
-export async function startRuntime(seed?: (store: Store) => void) {
+export async function startRuntime(seed?: (store: Store) => void, repositoryHost?: RepositoryHost) {
   const directory = mkdtempSync(join(tmpdir(), 'orchestrator-host-'))
   const AGENT = join(directory, 'agent-gh'), BOT = join(directory, 'lark-bot')
   const repository = { default_branch: 'master', permissions: { push: true } }
@@ -249,7 +251,7 @@ export async function startRuntime(seed?: (store: Store) => void) {
   seeded.saveSettings(SettingsSchema.parse({ ...seeded.settings(), sources }))
   seed?.(seeded)
   seeded.close()
-  const runtime = new Runtime(ctx, testMachine({ stateDir: directory }), vi.fn())
+  const runtime = new Runtime(ctx, testMachine({ stateDir: directory }), vi.fn(), repositoryHost)
   await runtime.ready
   runtime.sources.register(feishuKind); runtime.sources.register(githubKind)
   const settings = runtime.store.settings()
