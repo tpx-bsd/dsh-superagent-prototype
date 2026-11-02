@@ -1,9 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import type { Trigger } from '../src/core/index.ts'
-import { KV } from '../src/kv.ts'
 import { giteaHost } from '../src/sources/gitea-host.ts'
 import { giteaKind, pollFeed } from '../src/sources/gitea.ts'
-import { repositoryKey } from '../src/sources/gitea-api.ts'
 import { feishu, startRuntime, type Host } from './fixtures/host.ts'
 import { REPOSITORY, standInGitea, USERS, type StandInGitea } from './fixtures/gitea.ts'
 
@@ -18,13 +16,13 @@ afterEach(async () => {
   stand = undefined
 })
 
-async function setup(supplied?: StandInGitea, directory?: string) {
-  const g = stand = supplied ?? await standInGitea()
+async function setup() {
+  const g = stand = await standInGitea()
   const h = host = await startRuntime(store => {
     const settings = store.settings()
     store.saveSettings({ ...settings, sources: { ...settings.sources,
       gitea: { enabled: true, config: { url: g.url, repository: REPOSITORY, tokenFile: g.tokenFile } } } })
-  }, giteaHost, directory)
+  }, giteaHost)
   h.runtime.sources.register(giteaKind)
   const settings = h.runtime.store.settings()
   h.runtime.store.saveSettings({ ...settings, policy: { ...settings.policy,
@@ -36,8 +34,7 @@ async function setup(supplied?: StandInGitea, directory?: string) {
     return original.receive(trigger)
   } }
   const poll = () => pollFeed(ctx, new AbortController().signal)
-  const cursor = () => h.runtime.store.get(KV.gitea.cursor(repositoryKey(g.url, REPOSITORY)))
-  return { h, g, ctx, poll, cursor, received }
+  return { h, g, poll, received }
 }
 
 
@@ -127,6 +124,42 @@ it('delivers held context and wakes the blocked worker when a current human foll
   const saved = h.runtime.store.tickets.get(ticket.id)!
   expect(saved.undelivered).toEqual([])
   expect(saved.inputs.find(input => input.id === pending.id)).toMatchObject(pending)
+  expect(saved.delivery).toBeUndefined()
+})
+
+it('projects revoked historical human inputs as person/blocked on every operator and model ticket surface', async () => {
+  const { h, ticket } = await blockedTicket()
+  await saveBots(h, ['alice'])
+  await h.runtime.settings.pause(false, 'panel')
+  await h.runtime.idle()
+  expect((await h.api('GET', `tickets/${ticket.id}`)).body).toMatchObject({ stage: 'person', action: 'blocked', actions: { retry: true } })
+  expect((await h.api('GET', 'tickets?state=person')).body).toMatchObject({ total: 1, items: [{ id: ticket.id, stage: 'person', action: 'blocked' }] })
+  expect((await h.api('GET', 'tickets?state=working')).body).toMatchObject({ total: 0 })
+  expect((await h.api('GET', 'overview')).body).toMatchObject({ person: [{ id: ticket.id, stage: 'person', action: 'blocked' }], executor: { queued: 0 } })
+  expect((await h.api('GET', 'state')).body).toMatchObject({ load: { running: 0, queued: 0 } })
+  expect((await h.api('GET', 'search?q=Fix')).body).toMatchObject({ tickets: [{ id: ticket.id, stage: 'person', action: 'blocked' }] })
+  const read = (resource: string) => h.runTool(h.runtime.masterId, 'orchestrator_read', { resource })
+  expect(await read('tickets')).toMatchObject({ items: [{ ticket_id: ticket.id, state: 'person/blocked' }] })
+  expect(await read(`ticket/${ticket.id}`)).toMatchObject({ state: 'person/blocked' })
+  const origin = h.runtime.store.triggers.get(ticket.origin.triggerId)!
+  expect(await read(`thread/${origin.threads[0]!.source}:${origin.threads[0]!.id}`))
+    .toMatchObject({ tickets: [{ ticket_id: ticket.id, state: 'person/blocked' }] })
+})
+
+it('lets an operator retry a blocked worker behind a revoked historical human input', async () => {
+  const { h, ticket, sessionId, pending } = await blockedTicket()
+  await saveBots(h, ['alice'])
+  await h.runtime.settings.pause(false, 'panel')
+  await h.runtime.idle()
+  await h.runTool(h.runtime.masterId, 'orchestrator_ticket_retry', { ticket_id: ticket.id })
+  await h.runtime.idle()
+  const saved = h.runtime.store.tickets.get(ticket.id)!
+  expect(saved.assignments).toHaveLength(2)
+  expect(saved.assignments[0]).toMatchObject({ state: 'ended', endedReason: 'retried' })
+  expect(saved.assignments[1]).toMatchObject({ state: 'running' })
+  expect(h.agents.get(sessionId)!.status).toBe('running')
+  expect(saved.inputs.find(input => input.id === pending.id)).toMatchObject(pending)
+  expect(saved.undelivered).toEqual([])
   expect(saved.delivery).toBeUndefined()
 })
 

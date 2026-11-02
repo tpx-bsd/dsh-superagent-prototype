@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { Engine, MemoryRepositories, UserError, followupOwners, key, runningAssignment, ticketOutcome, ticketStage,
+import { Engine, MemoryRepositories, UserError, followupOwners, inputAuthority, key, runningAssignment, ticketOutcome, ticketStage,
   waitsForPerson } from '../src/core/index.ts'
 import type { Assessor, Assignment, Candidate, EngineOptions, Executor, OutboundMessage, Outcome, Policy, Ticket, Trigger } from '../src/core/index.ts'
 
@@ -61,7 +61,7 @@ function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket }:
   const read = (ticketId: string) => engine.inputsRead(ticketId, repo.tickets.get(ticketId)!.inputs.flatMap(input =>
     input.kind === 'trigger' && input.readAt === null ? [input.id] : []))
   const decide = (candidate: Candidate, outcome: Outcome) => engine.decide(candidate.triggers[0]!.id, { ...outcome, evalId: candidate.evalId })
-  return { repo, engine, outbox, withdrawn, requests, assessor, executor, delivered, settle, pump, read, decide,
+  return { humanInput: inputAuthority(repo.triggers, scope), repo, engine, outbox, withdrawn, requests, assessor, executor, delivered, settle, pump, read, decide,
     setVersion: (value: string) => { version = value }, setPaused: (value: boolean) => { paused = value }, tick: (seconds: number) => { clock += seconds } }
 }
 function accepted(h: ReturnType<typeof harness>, id = '1', thread = 't1') {
@@ -469,7 +469,7 @@ describe('context threads and notes', () => {
     h.engine.report(follower, { state: 'blocked', summary: 'needs a decision' })
     h.engine.receive(trigger('4')); h.pump()
     expect(h.requests.at(-1)!.triggers.map(item => item.id)).toEqual(['3', '4'])
-    expect(waitsForPerson(h.repo.tickets.get(follower)!)).toBe(true)
+    expect(waitsForPerson(h.repo.tickets.get(follower)!, h.humanInput)).toBe(true)
   })
   it('sends a message to Eval when the ticket it reached cannot resume and only a ticket following its Thread for context is left', () => {
     const h = harness()
@@ -981,19 +981,19 @@ describe('automatic input', () => {
     const ticketId = accepted(h).ticketId!
     const ticket = () => h.repo.tickets.get(ticketId)!
     h.engine.report(ticketId, { state: 'blocked', summary: 'needs a decision' })
-    expect(waitsForPerson(ticket())).toBe(true)
-    expect(ticketStage(ticket())).toEqual({ stage: 'person', action: 'blocked' })
+    expect(waitsForPerson(ticket(), h.humanInput)).toBe(true)
+    expect(ticketStage(ticket(), h.humanInput)).toEqual({ stage: 'person', action: 'blocked' })
     // The worker has the person's reply, so the stale blocked report no longer holds the ticket.
     h.tick(1); h.engine.receive(trigger('2', { actor: guest })); h.settle()
-    expect(waitsForPerson(ticket())).toBe(false)
-    expect(ticketStage(ticket())).toEqual({ stage: 'working' })
+    expect(waitsForPerson(ticket(), h.humanInput)).toBe(false)
+    expect(ticketStage(ticket(), h.humanInput)).toEqual({ stage: 'working' })
     h.tick(1); h.engine.report(ticketId, { state: 'failed', summary: 'broke' })
-    expect(waitsForPerson(ticket())).toBe(true)
+    expect(waitsForPerson(ticket(), h.humanInput)).toBe(true)
     h.tick(1); h.engine.report(ticketId, { state: 'progress', summary: 'found a way' })
-    expect(waitsForPerson(ticket())).toBe(false)
+    expect(waitsForPerson(ticket(), h.humanInput)).toBe(false)
     h.tick(1); h.engine.report(ticketId, { state: 'blocked', summary: 'needs access' })
     h.engine.retryTicket(ticketId)
-    expect(waitsForPerson(ticket())).toBe(false)
+    expect(waitsForPerson(ticket(), h.humanInput)).toBe(false)
   })
   it('launches a failed launch again for a person\'s message, but not for a Policy change', () => {
     const h = harness()
@@ -1169,7 +1169,7 @@ describe('retry after a failed delivery', () => {
     const answered = h.repo.tickets.get(ticketId)!
     expect(answered.undelivered).toHaveLength(1)
     h.engine.deliveryFailed(ticketId, runningAssignment(answered)!.id, 'Session gone')
-    expect(ticketStage(h.repo.tickets.get(ticketId)!)).toEqual({ stage: 'person', action: 'delivery' })
+    expect(ticketStage(h.repo.tickets.get(ticketId)!, h.humanInput)).toEqual({ stage: 'person', action: 'delivery' })
     const retried = h.engine.retryTicket(ticketId)
     expect(retried.assignments.map(item => item.state)).toEqual(['ended', 'pending'])
     expect(retried).not.toHaveProperty('delivery')

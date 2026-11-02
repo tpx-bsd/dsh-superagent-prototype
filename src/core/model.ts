@@ -359,7 +359,7 @@ export function inputAuthority(triggers: Pick<Repositories['triggers'], 'get'>, 
  * Whether a ticket waits for a person: its latest Assignment reported blocked or failed, and no person's message reached it
  * since. A later report that is neither, a person's message, or a retry, which starts a new Assignment, lifts it.
  */
-export function waitsForPerson(ticket: Ticket, human: (input: Extract<TicketInput, { kind: 'trigger' }>) => boolean = input => !!input.human): boolean {
+export function waitsForPerson(ticket: Ticket, human: InputAuthority): boolean {
   const report = latestAssignment(ticket)?.report
   if (report?.state !== 'blocked' && report?.state !== 'failed') return false
   return !ticket.inputs.some(input => input.kind === 'trigger' && human(input) && !input.context && input.at > report.at)

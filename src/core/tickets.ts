@@ -166,7 +166,7 @@ export class Tickets extends EnginePart {
   retry(ticketId: string): Ticket {
     const ticket = this.require(ticketId)
     const latest = latestAssignment(ticket)
-    if (!canRetry(ticket) || !latest) throw new UserError('notRetryable')
+    if (!canRetry(ticket, input => this.humanInput(input)) || !latest) throw new UserError('notRetryable')
     this.endAssignment(ticket, latest, 'retried')
     this.requeueUntaken(ticket, latest)
     const assignment = this.newAssignment(ticket)

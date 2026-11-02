@@ -1,6 +1,6 @@
 /** Concurrent runtime behavior across overlapping triggers, deliveries, and worker launches. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { latestAssignment, waitsForPerson, type Ticket, type Trigger } from '../src/core/index.ts'
+import { inputAuthority, latestAssignment, waitsForPerson, type Ticket, type Trigger } from '../src/core/index.ts'
 import { Later } from '../src/app/effects.ts'
 import { reportRelay } from '../src/app/notices.ts'
 import { WorkerSlots, inputMessage, mandateInstructions, ticketExecution, transient, triggerMessage } from '../src/executor/dsh.ts'
@@ -804,7 +804,7 @@ it('reports a worker waiting when its turn ends after a person answered its bloc
   await new Promise(resolve => setTimeout(resolve, 5))
   h.runtime.receive(feishu('2', '蓝色', { mentions: [], root_id: 'om_1' })); await h.runtime.idle()
   const ticket = () => h.runtime.store.tickets.get(one.ticket.id)!
-  expect(waitsForPerson(ticket())).toBe(false)
+  expect(waitsForPerson(ticket(), inputAuthority(h.runtime.store.triggers, h.runtime.sources))).toBe(false)
   h.agents.get(one.sessionId)!.status = 'idle'
   h.ctx.emit('agent/status', { agent: h.agents.get(one.sessionId), status: 'idle' } as never)
   await vi.waitFor(() => expect(latestAssignment(ticket())?.report?.state).toBe('waiting'))
@@ -932,11 +932,11 @@ describe('the Executor\'s parts', () => {
   it('relays a worker\'s question, result or answer to the main Session, and keeps its progress internal', () => {
     const ticket = { id: 't1', title: 'Fix', updatedAt: '2026-09-01T00:00:00Z', attention: { id: 'a1', question: 'Which color?' }, assignments: [],
       mandate: { strength: 'explicit' }, origin: { triggerId: 'tr1' } } as unknown as Ticket
-    expect(reportRelay(ticket, { state: 'progress', summary: 'halfway' })).toBeUndefined()
-    expect(reportRelay(ticket, { state: 'blocked', summary: 'need input', question: 'Which color?' }))
+    expect(reportRelay(ticket, { state: 'progress', summary: 'halfway' }, input => !!input.human)).toBeUndefined()
+    expect(reportRelay(ticket, { state: 'blocked', summary: 'need input', question: 'Which color?' }, input => !!input.human))
       .toMatchObject({ id: 'attention:t1:a1', text: expect.stringContaining('"kind":"worker_attention"') })
     const ready = reportRelay({ ...ticket, attention: undefined } as unknown as Ticket, { state: 'ready', summary: 'Done',
-      answers: 'tr9' })!
+      answers: 'tr9' }, input => !!input.human)!
     expect(ready.id).toMatch(/^report:/)
     expect(JSON.parse(ready.text)).toMatchObject({ kind: 'worker_report', ticket: { ticket_id: 't1' }, trigger_id: 'tr1', state: 'ready', answer_to: 'tr9', summary: 'Done' })
   })

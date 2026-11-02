@@ -1,5 +1,5 @@
 /** Ticket list, ticket detail, mandate basis formatting, and executor load views. */
-import { liveTicket, threadKey, ticketStage, type AcceptMode, type AdmissionCell, type MandateBasis, type Ticket,
+import { liveTicket, threadKey, ticketStage, type AcceptMode, type AdmissionCell, type InputAuthority, type MandateBasis, type Ticket,
   type TicketStage } from '../../core/index.ts'
 import { workerSessionId } from '../../executor/dsh.ts'
 import type { Store } from '../store.ts'
@@ -35,7 +35,7 @@ export function basisFacts(basis: MandateBasis, rule: Snapshot['rule']): { facts
 export function ticketList(host: ViewHost, stage: 'open' | TicketStage['stage'], offset: number, limit: number) {
   const view = snapshot(host)
   const { store } = view
-  const shown = (ticket: Ticket) => stage === 'open' ? liveTicket(ticket) : ticketStage(ticket).stage === stage
+  const shown = (ticket: Ticket) => stage === 'open' ? liveTicket(ticket) : ticketStage(ticket, view.humanInput).stage === stage
   const tickets = (stage === 'ended' ? store.tickets.list() : store.tickets.open()).filter(shown).sort(newestFirst)
   const result = page(tickets, offset, limit)
   return { ...result, items: result.items.map(ticket => ticketRow(view, ticket)) }
@@ -49,8 +49,8 @@ export function ticketRow(view: Snapshot, ticket: Ticket) {
 }
 /** Executor slot utilization: `running` worker Sessions in an active turn (which occupy slots and are interrupted by a restart), and tickets `queued` for a slot. */
 export interface ExecutorLoad { running: number; queued: number }
-export function executorLoad(store: Store, running: number): ExecutorLoad {
-  const queued = (ticket: Ticket) => { const stage = ticketStage(ticket); return stage.stage === 'working' && stage.action === 'queued' }
+export function executorLoad(store: Store, running: number, human: InputAuthority): ExecutorLoad {
+  const queued = (ticket: Ticket) => { const stage = ticketStage(ticket, human); return stage.stage === 'working' && stage.action === 'queued' }
   return { running, queued: store.tickets.open().filter(queued).length }
 }
 export function ticketDetail(host: ViewHost, id: string) {
@@ -58,7 +58,7 @@ export function ticketDetail(host: ViewHost, id: string) {
   const ticket = store.tickets.get(id)
   if (!ticket) return undefined
   const view = snapshot(host)
-  const { stage } = ticketStage(ticket)
+  const { stage } = ticketStage(ticket, view.humanInput)
   const decision = store.decisions.get(ticket.decisionId)
   const input = (value: Ticket['inputs'][number]) => {
     const trigger = value.kind === 'trigger' ? store.triggers.get(value.triggerId) : undefined
