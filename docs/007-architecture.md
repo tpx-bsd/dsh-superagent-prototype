@@ -186,9 +186,9 @@ Sources extend the host through `SourceKind`, defined in `src/sources/kind.ts`. 
 
 `SourceRegistry` (`registry.ts`) owns registered kinds and stored instances, and implements the Engine's `SourceScope`. Registration claims health entries on `HealthBoard`; duplicate claims and reserved `sync:` names are refused. A SourceContext writes only through its registration's claimed entries, so reports after unregistration do nothing.
 
-Registry configuration methods include `kind`, `instances`, `instance`, `validate`, `validatePolicy`, `policyPart`, `channelAllowed`, `declarations`, `environments`, `find` and `scope`. `find` asks each kind that supports search.
+Registry configuration methods include `kind`, `instances`, `instance`, `validate`, `validatePolicy`, `policyPart`, `channelAllowed`, `declarations`, `environments`, `find`, `scope` and `permitsHuman`. `find` asks each kind that supports search.
 
-Generic code accesses Source behavior through the registry. `send(message, commands)` calls the kind's Channel and returns `sent`, `gone` or `waiting` if the kind is not installed. `link` resolves its Channel link. `threadContext` pairs a kind's reader with its configuration, or returns nothing when the kind has no reader. Invalid stored configuration disables the instance.
+Generic code accesses Source behavior through the registry. `send(message, commands)` calls the kind's Channel and returns `sent`, `gone` or `waiting` if the kind is not installed. `link` resolves its Channel link. `threadContext` pairs a kind's reader with its configuration, or returns nothing when the kind has no reader. Invalid stored configuration disables the instance. A Source Policy can veto current human authority through `permitsHuman(actor, part)`. Registry dispatches the callback using its validated Policy part. Gate, Mandate revalidation, follow-up ownership and pending-input wake checks apply this veto without changing historical records. Kinds without the callback preserve their original classification. Settings compares Policy effects with callbacks bound to each settings snapshot.
 
 Plugins receive `SourceHost`: the registry and `context(kind)`. The kind itself uses a narrower `SourceContext`, built by `sourceContextOf` in `src/app/source-context.ts`.
 
@@ -199,8 +199,8 @@ The repository the deployment works on is bound through one `RepositoryHost` (`s
 - `resolve` checks account identity and push access. It returns `RepositoryAccess` with the canonical repository, `Account`, `GitAccess`, and the Gitea version when applicable. `Account` holds `login` and `commitEmail`, plus either CLI `command` and `cli`, or Gitea `server` and `tokenFile`. `GitAccess` holds `origin`, `helper`, `insteadOf` prefixes, and optional repository `scope`. Setup writes and checks that access. Failures are `SetupError`s placed at the Source's kind.
 - `readPath` reads a file or a directory of the configured repository for the assessor.
 - `pullClaim` reads a pull request an Executor reported before the report's transaction, and returns a synchronous claim that the report runs inside it, so a refused claim records no report, relay or binding.
-- Optional `openPull` reads or creates a PR before the report transaction and returns a synchronous claim. Gitea implements it for `orchestrator_report.pr_open`; GitHub keeps its CLI workflow. Gitea reuses a marked PR from the same branch and default base, including after a conflict or ambiguous response. Shared `claimPull` checks the live Ticket and exclusive ownership inside the transaction. It accepts the originating PR or an agent-authored PR from the same repository and Ticket branch.
-- `pullEndNotices` gives the chat notices of a Ticket that ended merged or closed.
+- Optional `openPull` reads or creates a PR before the report transaction and returns a synchronous claim. Gitea implements it for `orchestrator_report.pr_open`; GitHub keeps its CLI workflow. Gitea reuses the agent-authored PR from the same repository, branch and default base in any state, including after a conflict, ambiguous response or description edit. Shared `claimPull` checks the live Ticket and exclusive ownership inside the transaction. It accepts the originating PR or an agent-authored PR from the same repository and Ticket branch.
+- `pullEndNotices` gives chat and distinct Gitea Issue notices of a Ticket that ended merged or closed.
 
 Gitea's `GiteaApi` owns HTTP, wire parsing, pagination, and token reads. `readToken` and the bundled Git helper keep credentials out of settings contents, arguments, and model text. The helper uses the repository scope and `useHttpPath`; GitHub's generated environment remains unchanged. Gitea Trigger ids, `gitea:<repository key>:<number>` Threads, Channels, and cursor keys include server and repository identity. Channels and scope compare both against current settings.
 
@@ -499,7 +499,7 @@ A generated column is computed from its row's JSON and is empty outside its set,
 | Prompt versions | `prompt-revision`, `prompt-version:<n>` |
 | Main Session | `master-id` |
 | Session prompt history | `session-prompts:<session id>` |
-| Source state | Read positions such as `github-cursor:<number>` and `gitea-cursor:<repository key>`, PR CI fingerprints and seen Feishu-topic messages; keys begin with the kind or `thread-` plus a Thread key |
+| Source state | Gitea repository activation times and read positions such as `github-cursor:<number>` and `gitea-cursor:<repository key>`, PR CI fingerprints and seen Feishu-topic messages; keys begin with the kind or `thread-` plus a Thread key |
 | Display names | `source-labels:<source id>` |
 
 Dismissal is stored on its Decision. Input text is rendered from the Ticket when read, so neither needs a separate key-value record.

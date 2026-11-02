@@ -81,7 +81,7 @@ The host recognizes GitHub Apps, logins ending in `[bot]`, and Feishu bots as bo
 
 On Gitea, only an unmigrated author with a positive account id and API type `User` counts as a person. `Bot`, `Organization`, missing or unknown types, and placeholder authors have no human authority. The agent's own messages produce no Trigger.
 
-List ordinary Gitea accounts used for automation under `policy.sources.gitea.bots`, even if they report type `User`. This overrides human classification, including membership in `allowed`. A listed bot's mention can become only an inferred candidate. It cannot authorize a human follow-up or resume an ended Ticket.
+List ordinary Gitea accounts used for automation under `policy.sources.gitea.bots`, even if they report type `User`. This vetoes human authority under the current Policy, including membership in `allowed` and messages already stored as human. Historical Triggers and Mandates keep their original classification. Pending inputs do not retain human follow-up or wake authority after this change. A listed bot's mention can become only an inferred candidate. It cannot authorize a human follow-up or resume an ended Ticket.
 
 On GitHub and Feishu, an automated reviewer using an ordinary account counts as a person to the host. Its comments reach subscribed Tickets and generate follow-up notices. Team prompt text must identify such accounts as automated reviewers.
 

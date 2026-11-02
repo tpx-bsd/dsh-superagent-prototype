@@ -40,7 +40,7 @@ export class Intake extends EnginePart {
         // Only a person's message on a non-context thread resumes an ended ticket; bots and CI do not (the Executor re-reads
         // threads when it resumes), and a human-stopped ticket receives nothing because its Mandate was withdrawn.
         const followed = !!thread.context?.includes(ticketId)
-        const resumes = trigger.human && ticket?.ended?.by !== 'human' && !followed
+        const resumes = this.human(trigger) && ticket?.ended?.by !== 'human' && !followed
         if (!ticket || (!liveTicket(ticket) && !resumes)) continue
         reached.set(ticketId, { ticket, context: followed && (reached.get(ticketId)?.context ?? true) })
       }
@@ -48,7 +48,7 @@ export class Intake extends EnginePart {
     }
     for (const [ticketId, { ticket, context: followed }] of reached) {
       this.tickets.addInput(ticket, { id: key('input', ticketId, 'trigger', trigger.id), kind: 'trigger', triggerId: trigger.id, at,
-        ...trigger.human ? { human: true } : {}, ...followed ? { context: true } : {} })
+        ...this.human(trigger) ? { human: true } : {}, ...followed ? { context: true } : {} })
     }
     const fanout = [...reached.keys()], context = fanout.filter(id => reached.get(id)!.context)
     const disposition = { fanout, ...context.length ? { context } : {}, at }

@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { z } from 'zod'
-import { UserError, followupOwners, key, reasonText, type Decision, type DecisionKind, type EngineForMainSession, type EngineForPeople }
+import { UserError, followupOwners, key, reasonText, type Decision, type DecisionKind, type EngineForMainSession, type EngineForPeople, type SourceScope }
   from '../../core/index.ts'
 import { IM_WORDS, NOTE_WORDS, wordCount } from '../../infra/text.ts'
 import { AssessmentSchema, EvalReadSchema, WorktreeNameSchema, type MasterAssessor } from '../assessment.ts'
@@ -25,6 +25,7 @@ export interface MainToolsHost {
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'modelRetry'>
   readonly settings: Pick<Settings, 'view' | 'block' | 'save' | 'pause' | 'sync'>
   readonly assessor: Pick<MasterAssessor, 'context' | 'read' | 'decide'>
+  readonly sources: SourceScope
   readonly resources: ResourceHost
   /** Schedules a pass to carry out work queued by an Engine command (such as an Eval or ticket resume). */
   requestPass(): void
@@ -192,7 +193,7 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
       execute: async args => {
         // A follow-up that reached a ticket is its worker's to judge, which hands back what is not its own; a person may still requeue it.
         const trigger = host.store.triggers.get(args.trigger_id)
-        const owners = trigger ? followupOwners(trigger, host.store) : []
+        const owners = trigger ? followupOwners(trigger, host.store, host.sources) : []
         if (owners.length) throw new UserError('workerDecides', { tickets: owners.join(', ') })
         const queued = host.quietly(() => host.engine.reevaluate(args.trigger_id))
         host.requestPass()

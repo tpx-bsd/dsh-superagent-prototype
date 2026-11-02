@@ -18,6 +18,7 @@ const GiteaConfigSchema = GiteaAccountsSchema.extend({ pollSeconds: z.number().i
   failuresBeforeError: z.number().int().min(1).max(20).default(3) }).strict()
 export type GiteaConfig = z.infer<typeof GiteaConfigSchema>
 const Login = z.string().regex(/^[A-Za-z0-9_.-]+$/)
+const Accounts = z.array(z.object({ id: Login }).strict())
 function configured(config: GiteaConfig): Pick<GiteaConnection, 'server' | 'repository'> | undefined {
   try { return config.repository ? { server: giteaServer(config.url), repository: config.repository } : undefined } catch { return undefined }
 }
@@ -55,7 +56,8 @@ export const giteaKind: SourceKind<GiteaConfig> = {
     return { threads: repository && number ? [`${SOURCE}:${repositoryKey(repository.server, repository.repository)}:${number}`] : [], terms: [] }
   },
   policy: {
-    schema: z.object({ allowed: z.array(z.object({ id: Login }).strict()).default([]), bots: z.array(z.object({ id: Login }).strict()).optional() }).strict(),
+    schema: z.object({ allowed: Accounts.default([]), bots: Accounts.optional() }).strict(),
+    permitsHuman: (actor, part) => !Accounts.parse(part.bots ?? []).some(bot => sameName(bot.id, actor.id)),
     fields: [{ key: 'allowed', type: 'rows', label: { zh: '能发起工作的 Gitea 账号', en: 'Gitea accounts that may originate work' },
       columns: [{ key: 'id', type: 'text', label: { zh: '账号', en: 'Account' }, pattern: '[A-Za-z0-9_.\\-]+' }] },
     { key: 'bots', type: 'rows', label: { zh: '自动化账号', en: 'Automation accounts' },
@@ -152,7 +154,7 @@ export async function pollFeed(ctx: SourceContext, signal: AbortSignal): Promise
   const issues = await api.issues(window, tally)
   const comments = await api.comments(window, tally)
   const agent = ctx.deployment.account.login
-  const bots = z.array(z.object({ id: z.string() })).catch([]).parse(ctx.policy(SOURCE)?.bots ?? []).map(bot => bot.id)
+  const bots = Accounts.catch([]).parse(ctx.policy(SOURCE)?.bots ?? []).map(bot => bot.id)
   const watched = new Set(ctx.threads.subscribed(SOURCE).filter(thread => polled(ctx, thread)).map(thread => thread.key))
   const triggers: Trigger[] = []
   for (const issue of issues) {

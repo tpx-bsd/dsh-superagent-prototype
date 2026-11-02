@@ -86,7 +86,7 @@ const FOLLOWUP_NOTE = 'Its ticket\'s worker has it and decides; act only if the 
 export function followupNotice(store: Store, sources: SourceRegistry, triggerId: string): Relay | undefined {
   const trigger = store.triggers.get(triggerId)
   const disposition = store.triggers.disposition(triggerId)
-  if (!trigger || !followupOwners(trigger, store).length) return undefined
+  if (!trigger || !followupOwners(trigger, store, sources).length) return undefined
   const tickets = disposition!.fanout.flatMap(id => {
     const ticket = store.tickets.get(id)
     const context = disposition!.context?.includes(id) ? { context: true } : {}

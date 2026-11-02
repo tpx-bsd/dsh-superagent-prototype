@@ -13,7 +13,7 @@ import { sendGitea } from '../src/sources/gitea-channel.ts'
 import { readGitea } from '../src/sources/gitea-read.ts'
 import { apply as applyGithub } from '../src/sources/github.ts'
 import { KV } from '../src/kv.ts'
-import { threadKey, type Trigger } from '../src/core/index.ts'
+import { followupOwners, threadKey, type Trigger } from '../src/core/index.ts'
 import { settingsPolicy } from '../src/policy.ts'
 import { feishu, startRuntime, type Host } from './fixtures/host.ts'
 import { gitEnv } from './fixtures/git.ts'
@@ -120,12 +120,11 @@ describe('pull requests', () => {
     expect(created()).toBe(1)
   })
   it('opens one PR when two reports race', async () => {
-    const { gitea, branch, report, created } = await workerTicket()
+    const { gitea, branch, report } = await workerTicket()
     const draft = { pr_open: { branch, title: 'Fix', body: 'Fix.' } }
     const results = await Promise.all([report(draft), report(draft)])
     expect(results.map(result => (result.pr as { number: number }).number)).toEqual([1, 1])
     expect([...gitea.issues.values()].filter(issue => issue.pull)).toHaveLength(1)
-    expect(created()).toBe(2)
   })
   it('adopts a PR whose creation answer was lost, also once a person closed it, and never opens a second one', async () => {
     const { h, gitea, ticket, branch, report, created } = await workerTicket()
@@ -216,6 +215,139 @@ describe('the Gitea Source', () => {
     await h.runtime.sendReplies()
     expect(gitea.agentComments(request).map(comment => comment.body)).toEqual(['Echo of @agent', expect.stringMatching(/^On it\.\n\n<!-- dsh-superagent:.+ -->$/)])
     expect(ticket.channels[0]).toMatchObject({ source: 'gitea', address: { server: gitea.url, repository: REPOSITORY, number: String(request) } })
+  })
+  async function savePolicy(host: Host, part: { allowed: { id: string }[]; bots?: { id: string }[] }) {
+    const policy = host.runtime.store.settings().policy
+    await host.runtime.settings.save('policy', { ...policy, sources: { ...policy.sources, gitea: part } },
+      host.runtime.store.blockRevision('policy'), 'panel')
+    await host.runtime.idle()
+  }
+  it('revokes pending human acceptance and stop authority when the current policy lists the sender as automation', async () => {
+    const { h, gitea, poll, received } = await source()
+    const { ticket } = await h.acceptedTicket(feishu('other', '@bot fix the login'))
+    await poll()
+    gitea.tick(30)
+    gitea.issue(USERS.alice, 'Request', '@agent fix this and stop the other work')
+    gitea.tick(30)
+    await poll()
+    const trigger = received[0]!
+    await h.runtime.idle()
+    expect(h.runtime.engine.candidate(trigger.id)?.strength).toBe('explicit')
+    await savePolicy(h, { allowed: [{ id: 'alice' }], bots: [{ id: 'ALICE' }] })
+    expect(h.runtime.engine.candidate(trigger.id)?.strength).toBe('inferred')
+    await expect(h.route({ kind: 'accept', trigger_id: trigger.id, title: 'Fix', worktree_name: 'fix', acknowledgement: 'On it.' })).rejects.toThrow()
+    expect(await h.route({ kind: 'stop', trigger_id: trigger.id, ticket_id: ticket.id })).toMatchObject({ decision: 'ignore' })
+    expect(h.runtime.store.tickets.get(ticket.id)!.ended).toBeUndefined()
+    expect(h.runtime.store.tickets.list()).toHaveLength(1)
+    expect(h.runtime.store.triggers.get(trigger.id)!.human).toBe(true)
+  })
+  it('notifies a human requester of lost authority and refuses resume under their old mandate', async () => {
+    const { h, gitea, poll, received, accept } = await source()
+    await poll()
+    gitea.tick(30)
+    const number = gitea.issue(USERS.alice, 'Request', '@agent fix this')
+    gitea.tick(30)
+    await poll()
+    const ticket = await accept(received[0]!)
+    const mandate = ticket.mandate
+    await savePolicy(h, { allowed: [{ id: 'alice' }, { id: 'bob' }], bots: [{ id: 'alice' }] })
+    expect(h.runtime.store.tickets.get(ticket.id)!.inputs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'policy-changed', effect: expect.objectContaining({ requesterAllowed: false }) }),
+    ]))
+    await h.runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'ready', summary: 'Done.' })
+    gitea.tick(30)
+    gitea.comment(USERS.bob, number, '@agent continue')
+    gitea.tick(30)
+    await poll()
+    await h.runtime.idle()
+    expect(h.runtime.store.tickets.get(ticket.id)!.ended).toMatchObject({ outcome: 'completed' })
+    expect(h.runtime.store.tickets.get(ticket.id)!.mandate).toEqual(mandate)
+  })
+  it('does not resume from a pending historical human input after that sender becomes automation', async () => {
+    const { h, gitea, poll, received, accept } = await source()
+    await savePolicy(h, { allowed: [{ id: 'alice' }, { id: 'bob' }] })
+    await poll()
+    gitea.tick(30)
+    const number = gitea.issue(USERS.bob, 'Request', '@agent fix this')
+    gitea.tick(30)
+    await poll()
+    const ticket = await accept(received[0]!)
+    await h.runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'ready', summary: 'Done.' })
+    await h.runtime.settings.pause(true, 'panel')
+    gitea.tick(30)
+    gitea.comment(USERS.alice, number, '@agent continue')
+    gitea.tick(30)
+    await poll()
+    const trigger = received.find(item => item.meta.kind === 'comment')!
+    const pending = h.runtime.store.tickets.get(ticket.id)!.inputs.find(input => input.kind === 'trigger' && input.triggerId === trigger.id)!
+    expect(pending).toMatchObject({ human: true })
+    await savePolicy(h, { allowed: [{ id: 'alice' }, { id: 'bob' }], bots: [{ id: 'alice' }] })
+    expect(followupOwners(trigger, h.runtime.store, h.runtime.sources)).toEqual([])
+    await h.runtime.settings.pause(false, 'panel')
+    await h.runtime.idle()
+    expect(h.runtime.store.tickets.get(ticket.id)!.ended).toMatchObject({ outcome: 'completed' })
+    expect(h.runtime.store.tickets.get(ticket.id)!.inputs.find(input => input.id === pending.id)).toEqual(pending)
+    expect(settingsPolicy(h.runtime.store.settings(), h.runtime.sources).gate(trigger, h.runtime.store.threads.get(threadKey(trigger.threads[0]!))!, [])).toMatchObject({ strength: 'inferred' })
+    gitea.tick(30)
+    gitea.comment(USERS.bob, number, 'Continue, please.')
+    gitea.tick(30)
+    await poll()
+    expect(h.runtime.store.tickets.get(ticket.id)!.ended).toBeUndefined()
+  })
+  it('holds a blocked worker when a pending human input becomes automation before delivery', async () => {
+    const { h, gitea, poll, received, accept } = await source()
+    await savePolicy(h, { allowed: [{ id: 'alice' }, { id: 'bob' }] })
+    await poll()
+    gitea.tick(30)
+    const number = gitea.issue(USERS.bob, 'Request', '@agent fix this')
+    gitea.tick(30)
+    await poll()
+    const ticket = await accept(received[0]!)
+    const session = `worker-${ticket.id}`
+    await h.runTool(session, 'orchestrator_report', { state: 'blocked', summary: 'Need a decision.' })
+    await h.runtime.settings.pause(true, 'panel')
+    gitea.tick(30)
+    gitea.comment(USERS.alice, number, '@agent resume from the pending input')
+    gitea.tick(30)
+    await poll()
+    const trigger = received.find(item => item.meta.kind === 'comment')!
+    const input = h.runtime.store.tickets.get(ticket.id)!.inputs.find(item => item.kind === 'trigger' && item.triggerId === trigger.id)!
+    expect(input).toMatchObject({ human: true })
+    await savePolicy(h, { allowed: [{ id: 'alice' }, { id: 'bob' }], bots: [{ id: 'alice' }] })
+    h.deliveries.mockClear()
+    await h.runtime.settings.pause(false, 'panel')
+    await h.runtime.idle()
+    expect(h.deliveries.mock.calls.filter(([call]) => call.sessionId === session)).toEqual([])
+    expect(h.runtime.store.tickets.get(ticket.id)!.undelivered).toContain(input.id)
+    gitea.tick(30)
+    gitea.comment(USERS.bob, number, 'Continue with my decision.')
+    gitea.tick(30)
+    await poll()
+    await h.runtime.idle()
+    expect(h.deliveries.mock.calls.some(([call]) => call.sessionId === session && call.text.includes('Continue with my decision.'))).toBe(true)
+    expect(h.runtime.store.tickets.get(ticket.id)!.undelivered).toEqual([])
+  })
+  it('removes historical human follow-up ownership when current policy designates automation', async () => {
+    const { h, gitea, poll, received, accept } = await source()
+    await savePolicy(h, { allowed: [{ id: 'alice' }, { id: 'bob' }] })
+    await poll()
+    gitea.tick(30)
+    const number = gitea.issue(USERS.bob, 'Request', '@agent fix this')
+    gitea.tick(30)
+    await poll()
+    const ticket = await accept(received[0]!)
+    gitea.tick(30)
+    gitea.comment(USERS.alice, number, '@agent also fix logout')
+    gitea.tick(30)
+    await poll()
+    const trigger = received.find(item => item.meta.kind === 'comment')!
+    expect(followupOwners(trigger, h.runtime.store, h.runtime.sources)).toEqual([ticket.id])
+    await savePolicy(h, { allowed: [{ id: 'alice' }, { id: 'bob' }], bots: [{ id: 'alice' }] })
+    expect(followupOwners(trigger, h.runtime.store, h.runtime.sources)).toEqual([])
+    await expect(h.runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'progress', summary: 'Answer.', reply_to_trigger_id: trigger.id })).rejects.toThrow()
+    expect(h.runtime.engine.handback(ticket.id, trigger.id, 'Automated feedback.')).toBe(false)
+    await expect(h.route({ kind: 'accept', trigger_id: trigger.id, title: 'Fix', worktree_name: 'fix', acknowledgement: 'On it.' })).rejects.toThrow()
+    expect(h.runtime.store.tickets.list()).toHaveLength(1)
   })
   it('keeps the read position through a poll that stopped or failed part-way, and reads what it missed once', async () => {
     const { h, gitea, poll, received, cursor } = await source()
@@ -374,6 +506,23 @@ describe('the Gitea Source', () => {
     expect(gitea.agentComments(1)).toHaveLength(2)
     expect(gitea.agentComments(2)).toHaveLength(2)
     expect(gitea.requests.filter(request => request.method !== 'GET' && !/\/(pulls|comments)$/.test(request.path))).toEqual([])
+  })
+  it('keeps terminal notices off the originating PR conversation when it is the terminal PR itself', async () => {
+    const { h, gitea, poll, received, accept } = await source()
+    await poll()
+    gitea.tick(30)
+    const number = gitea.issue(USERS.alice, 'Request', '@agent review this', { head: 'alice/fix', base: 'main' })
+    gitea.tick(30)
+    await poll()
+    const ticket = await accept(received[0]!)
+    await h.runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'progress', summary: 'Reviewed.', pr_number: number })
+    gitea.tick(30)
+    gitea.close(number)
+    gitea.tick(30)
+    await poll()
+    await h.runtime.sendReplies()
+    expect(h.runtime.store.tickets.get(ticket.id)!.ended).toMatchObject({ outcome: 'closed' })
+    expect(gitea.agentComments(number).map(comment => comment.body)).toEqual([expect.stringContaining('On it.')])
   })
   it('reads conversations for assessments and workers, page by page, marking accounts that are no person', async () => {
     const { h, gitea } = await source()

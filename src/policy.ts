@@ -5,7 +5,7 @@
 import { LIMITS } from './limits.ts'
 import { z } from 'zod'
 import { ADMISSION_DEFAULTS, type Admission, type AdmissionCell, type AdmissionRow } from './admission.ts'
-import { key, type AssessmentOutcome, type Mandate, type Policy, type PolicyEffect, type SourceScope, type Strength, type Thread, type Ticket,
+import { currentHuman, key, type AssessmentOutcome, type Mandate, type Policy, type PolicyEffect, type SourceScope, type Strength, type Thread, type Ticket,
   type Trigger, type ActorRef, type GateResult } from './core/index.ts'
 import { sameName } from './infra/text.ts'
 import { WORKER_COMMANDS } from './infra/environment.ts'
@@ -108,7 +108,7 @@ export type SettingsBlock = 'policy' | 'eval' | 'executor' | `source:${string}`
 export type SettingsSave = SettingsBlock | 'pause'
 export type SettingsOrigin = 'panel' | 'tool' | 'sync'
 
-export const POLICY_REVISION = 'mandate-v3'
+export const POLICY_REVISION = 'mandate-v4'
 /**
  * Compute a version hash for settings that affect work authorization.
  * Changes to models, concurrency, pause state, or polling intervals do not invalidate existing decisions.
@@ -189,7 +189,7 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
   return {
     version, paused: settings.paused, evalTimeoutMs: settings.eval.timeoutSeconds * 1000,
     gate(trigger: Trigger, thread, tickets) {
-      if (!trigger.human) return machineGate(trigger)
+      if (!currentHuman(trigger, sources)) return machineGate(trigger)
       const allowed = allowedSender(settings, trigger.actor)
       const scope = listened(sources, trigger.source, trigger.meta)
       const row = scope.listened ? scope.row : undefined
@@ -213,6 +213,7 @@ export function settingsPolicy(settings: Settings, sources: SourceScope): Policy
     revalidate(mandate: Mandate) {
       // Revalidation rules follow docs/002 (Eval path; Resume revalidates).
       const { basis } = mandate
+      if (sources.permitsHuman?.(mandate.actor) === false && !(basis.via === 'bot' && mandate.strength === 'inferred')) return false
       const { source } = basis
       const current = source && basis.scope ? listened(sources, source, basis.scope) : undefined
       if (current && !current.listened) return false

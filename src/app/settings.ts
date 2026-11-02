@@ -1,7 +1,7 @@
 /** Block-scoped settings validation, optimistic concurrency saves, processing pause control, and source policy synchronization. */
 import type { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
-import { UserError, type EngineForSettings } from '../core/index.ts'
+import { UserError, type ActorRef, type EngineForSettings } from '../core/index.ts'
 import { EvalConfigSchema, ExecutorConfigSchema, PolicyConfigSchema, SettingsSchema, policyEffects, policyVersion } from '../policy.ts'
 import type { Settings as SettingsValue, SettingsBlock, SettingsOrigin, SettingsSave } from '../policy.ts'
 import type { SourceHost } from '../sources/host.ts'
@@ -176,7 +176,8 @@ export class Settings {
     const restarting = setupChanged(old, settings) || !this.host.setup.configured()
     const before = policyVersion(old), after = policyVersion(settings)
     const scope = (version: SettingsValue) => ({
-      scope: (input: { source: string; meta: Record<string, unknown> }) => this.host.sources.scope(input, version) })
+      scope: (input: { source: string; meta: Record<string, unknown> }) => this.host.sources.scope(input, version),
+      permitsHuman: (actor: ActorRef) => this.host.sources.permitsHuman(actor, version) })
     const effects = before === after ? new Map() : policyEffects(store.tickets.open(), old, SettingsSchema.parse(settings), scope)
     const notified = [...effects.keys()]
     store.atomic(() => {

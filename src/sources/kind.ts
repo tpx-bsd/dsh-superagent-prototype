@@ -1,7 +1,7 @@
 /** SourceKind plugin contract: configuration schema, UI form fields, policy integration, channel adapter, and thread context reader. */
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { z } from 'zod'
-import type { OutboundMessage, ScopeResult, Trigger } from '../core/index.ts'
+import type { ActorRef, OutboundMessage, ScopeResult, Trigger } from '../core/index.ts'
 import type { Deployment } from '../deployment.ts'
 import type { Commands } from '../infra/commands.ts'
 import type { SourceContext, SourceHost } from './host.ts'
@@ -28,6 +28,8 @@ export interface AdmissionRowView { id: string; label: Localized | string; note:
 export interface SourcePolicyPart<P extends Record<string, unknown>> {
   /** Validates the Source's part of the Policy, including `allowed` (senders who may originate work). */
   schema: z.ZodType<P>
+  /** Vetoes human authority under the current Source Policy without changing stored events. */
+  permitsHuman?(actor: ActorRef, part: P): boolean
   /** Form fields of the policy part; the first is `allowed`. */
   fields: FieldSpec[]
   /** Describes what the Source marks as addressed to the agent, which an allowed sender's explicit request requires. */

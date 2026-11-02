@@ -1,4 +1,5 @@
 /** Domain model of a proactive agent: the concepts and their invariants, independent of any source, policy, or executor. */
+import type { SourceScope } from './ports.ts'
 import type { Reason } from './reasons.ts'
 
 /** Actor identity in the source's own vocabulary; Policy decides which actors may originate work on that Source. */
@@ -38,6 +39,10 @@ export interface Trigger {
   meta: Record<string, unknown>
 }
 
+/** Human authority today, preserving the Source's original non-human classification. */
+export const currentHuman = (trigger: Pick<Trigger, 'human' | 'actor'>, sources: Pick<SourceScope, 'permitsHuman'>): boolean =>
+  trigger.human && sources.permitsHuman?.(trigger.actor) !== false
+
 /** Where a trigger went after intake; it grants nothing, but decides who decides a person's follow-up (see `followupOwners`). */
 export interface TriggerDisposition {
   /** Rejected by the source scope filter before entering the domain, for the Source's reason. */
@@ -72,8 +77,8 @@ export interface FollowupRecords {
  * an Eval holds it, which an earlier version may have queued. While a ticket owns it, the message goes to no Eval, and the
  * main Session may only stop the work on it.
  */
-export function followupOwners(trigger: Pick<Trigger, 'id' | 'human' | 'threads'>, records: FollowupRecords): string[] {
-  if (!trigger.human) return []
+export function followupOwners(trigger: Pick<Trigger, 'id' | 'human' | 'threads' | 'actor'>, records: FollowupRecords, sources: Pick<SourceScope, 'permitsHuman'> = {}): string[] {
+  if (!currentHuman(trigger, sources)) return []
   const disposition = records.triggers.disposition(trigger.id)
   if (!disposition || disposition.requeued) return []
   // The disposition alone rules most messages out, so a Thread or a ticket is read only for one that may have an owner.
@@ -346,8 +351,8 @@ export function readUntil(ticket: Pick<Ticket, 'assignments'>, progress = true):
  * Whether a ticket waits for a person: its latest Assignment reported blocked or failed, and no person's message reached it
  * since. A later report that is neither, a person's message, or a retry, which starts a new Assignment, lifts it.
  */
-export function waitsForPerson(ticket: Ticket): boolean {
+export function waitsForPerson(ticket: Ticket, human: (input: Extract<TicketInput, { kind: 'trigger' }>) => boolean = input => !!input.human): boolean {
   const report = latestAssignment(ticket)?.report
   if (report?.state !== 'blocked' && report?.state !== 'failed') return false
-  return !ticket.inputs.some(input => input.kind === 'trigger' && input.human && !input.context && input.at > report.at)
+  return !ticket.inputs.some(input => input.kind === 'trigger' && human(input) && !input.context && input.at > report.at)
 }

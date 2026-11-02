@@ -1,7 +1,7 @@
 /** Shared view projections for triggers, tickets, threads, decisions, and channel links. */
 import { z } from 'zod'
 import { canRetry, followupOwners, latestReport, liveTicket, settled, threadKey, ticketStage, type ActorRef, type ChannelRef, type Decision,
-  type DecisionKind, type Thread, type ThreadFacts, type Ticket, type TicketStage, type Trigger } from '../../core/index.ts'
+  type DecisionKind, type SourceScope, type Thread, type ThreadFacts, type Ticket, type TicketStage, type Trigger } from '../../core/index.ts'
 import { allowedSender, listedBot } from '../../policy.ts'
 import type { ChannelLink, Localized } from '../../sources/kind.ts'
 import type { SourceRegistry } from '../../sources/registry.ts'
@@ -24,14 +24,14 @@ export type Owners = (trigger: Trigger) => string[]
  * The owners of follow-ups as one request reads them: the rows of a page share their tickets and Threads, so each is read
  * once however many rows it decides.
  */
-export function ownersOf(store: Pick<Store, 'tickets' | 'threads' | 'triggers'>): Owners {
+export function ownersOf(store: Pick<Store, 'tickets' | 'threads' | 'triggers'>, sources: Pick<SourceScope, 'permitsHuman'> = {}): Owners {
   const once = <T>(read: (id: string) => T) => {
     const seen = new Map<string, T>()
     return (id: string) => { if (!seen.has(id)) seen.set(id, read(id)); return seen.get(id) as T }
   }
   const records = { tickets: { get: once(id => store.tickets.get(id)) }, threads: { get: once(key => store.threads.get(key)) },
     triggers: store.triggers }
-  return trigger => followupOwners(trigger, records)
+  return trigger => followupOwners(trigger, records, sources)
 }
 /** One request's reads, each read once: the Threads each Ticket subscribes to, the rules by id, and the senders' names. */
 export interface Snapshot extends ViewHost {
@@ -64,7 +64,7 @@ export function snapshot(host: ViewHost): Snapshot {
     const unnamed = sources.kind(source)?.policy?.unnamed
     return { source, id, name: unnamed ? human === false ? unnamed.bot : unnamed.person : named(id) }
   }
-  return { ...host, threadsOf, rule: id => ({ id, name: rules.get(id) ?? id }), actor, owners: ownersOf(store) }
+  return { ...host, threadsOf, rule: id => ({ id, name: rules.get(id) ?? id }), actor, owners: ownersOf(store, sources) }
 }
 
 /**
