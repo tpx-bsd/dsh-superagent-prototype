@@ -291,7 +291,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 - Runtime selects `githubHost`, the only place shared code names the GitHub binding. Setup, MasterAssessor, the Executor tools and the end notices reach it as a `RepositoryHost`.
 - The bundled skills are the Source skills (`SourceSkill` in `src/app/skill-files.ts`): Feishu's with a working bot, then the repository host's. Migration converts their schema-10 records.
 - Setup probes only GitHub and Feishu account fields (`SETUP_FIELDS`). Only those Sources receive account setup problems through `SourceContext.problem`.
-- `Commands.api`, `pages` and `gh` are the GitHub Source's transport, limited to the configured repository; no shared module calls them.
+- `Commands.api`, `pages` and `gh` are the GitHub Source's transport. `api` and `pages` limit paths to the configured repository; no shared module calls these transport methods directly.
 
 
 ## Modules

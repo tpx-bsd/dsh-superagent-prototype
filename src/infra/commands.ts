@@ -53,8 +53,8 @@ function membership(error: unknown): unknown {
 }
 /**
  * Executes the account CLI, lark-cli, and git subprocesses with deployment account credentials, timeouts, and abort signals.
- * `gh`, `api` and `pages` are the GitHub Source's transport, restricted to the configured repository; shared code reads the repository
- * through `RepositoryHost`. Translates CLI failures into CliError instances for Sources, MasterAssessor, Outbox, and Settings.
+ * `gh`, `api` and `pages` are the GitHub Source's transport. `api` and `pages` restrict paths to the configured repository;
+ * shared code reads through `RepositoryHost`. Translates CLI failures into CliError instances for Sources, MasterAssessor, Outbox, and Settings.
  */
 export class Commands {
   /**
