@@ -49,6 +49,11 @@ export function giteaServer(text: string): string {
   if (url.search || url.hash) throw new Error('it must not have a query or a fragment')
   return `${url.origin}${url.pathname.replace(/\/+$/, '')}`
 }
+/** @throws Error for a deployment whose account has no Gitea token. */
+export function giteaConnection({ account, repository }: Pick<Deployment, 'account' | 'repository'>): GiteaConnection {
+  if (!('tokenFile' in account)) throw new Error('This installation\'s repository is not on Gitea')
+  return { server: account.server, repository, tokenFile: account.tokenFile }
+}
 /** A short id of one repository on one server, which the Threads and read positions of that repository carry. */
 export const repositoryKey = (server: string, repository: string): string => key('gitea', server.toLowerCase(), repository.toLowerCase()).slice(0, 12)
 
@@ -99,12 +104,7 @@ const PAGE = 50
 export class GiteaApi {
   private constructor(private readonly connection: GiteaConnection, private readonly signal?: AbortSignal) {}
   static connect(connection: GiteaConnection, signal?: AbortSignal): GiteaApi { return new GiteaApi(connection, signal) }
-  /** @throws Error for a deployment whose account has no Gitea token. */
-  static of(deployment: Pick<Deployment, 'account' | 'repository'>, signal?: AbortSignal): GiteaApi {
-    const { account, repository } = deployment
-    if (!('tokenFile' in account)) throw new Error('This installation\'s repository is not on Gitea')
-    return new GiteaApi({ server: account.server, repository, tokenFile: account.tokenFile }, signal)
-  }
+  static of(deployment: Pick<Deployment, 'account' | 'repository'>, signal?: AbortSignal): GiteaApi { return new GiteaApi(giteaConnection(deployment), signal) }
   /** The server's version, and its clock's time from the answer's `Date`, which bounds a poll's window. */
   async version(): Promise<{ version: string; at: string }> {
     const { body, headers } = await this.request('version', '/version')

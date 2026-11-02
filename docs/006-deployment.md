@@ -259,7 +259,7 @@ Setup problems appear on the overview with a link to the fix, in the panel's lan
 | `@… cannot read …` or `@… cannot push to …` | Give the agent account write access to the repository |
 | `The GitHub Source names no repository.` | Set the repository, `owner/name`, on the GitHub card |
 | A Ticket fails with `The prepare command failed: …` | The output names the cause, such as a wrong clone path; fix the command, then retry the Ticket |
-| `git does not read the github.com credential configuration dsh-superagent writes` | Install git 2.32 or later |
+| `git does not read the credential configuration dsh-superagent writes for the repository host` | Install git 2.32 or later |
 | A Ticket fails with `The git configuration of the repository in … sets …` | Remove the named credential or `http.*.extraheader` settings from the clone's `.git/config` |
 | `… was not written by dsh-superagent` | Move the named file out of `<stateDir>/worker-bin` or `<stateDir>/worker-gitconfig`, or choose another `stateDir` |
 | `The bot lark-cli allows user identities` | Point the Feishu Source at a bot-only configuration, as in Feishu bot above |

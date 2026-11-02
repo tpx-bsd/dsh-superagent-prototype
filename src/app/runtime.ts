@@ -17,7 +17,7 @@ import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, ty
 import { allowedSender, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
 import { Commands } from '../infra/commands.ts'
-import type { Deployment, Machine } from '../deployment.ts'
+import type { Deployment, Machine, RepositoryHostKind } from '../deployment.ts'
 import { environmentOf, ticketEnvironment, type Variable } from './execution-environment.ts'
 import type { SetupProblem } from '../setup.ts'
 import { DshExecutor, sourceTrigger, triggerMessage, workerSessionId } from '../executor/dsh.ts'
@@ -35,12 +35,13 @@ import type { LinkTarget } from './views/records.ts'
 import { candidateCard, repliedTo, sourceLink, type LinkHost } from './links.ts'
 import { eventNotice, followupNotice } from './notices.ts'
 import { githubHost } from '../sources/github-host.ts'
+import { giteaHost } from '../sources/gitea-host.ts'
 import { HealthBoard } from '../infra/health.ts'
 import { Outbox } from './outbox.ts'
 import { Passes } from './passes.ts'
 import { Setup } from './setup.ts'
 import { feishuSettings } from '../sources/feishu.ts'
-import { health, type Health, type RepositoryHost, type SourceContext, type SourceHost } from '../sources/host.ts'
+import { health, type Health, type PullDraft, type RepositoryHost, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
 import { Settings } from './settings.ts'
 import { sourceContextOf, type SourceContextDeps } from './source-context.ts'
@@ -51,6 +52,7 @@ import { executorTools, type ExecutorToolsHost } from './tools/executor.ts'
 // Source plugins interact with dsh-superagent exclusively through the `SourceHost` service interface.
 declare module '@deepseek-ai/cordis' { interface Context { orchestrator: SourceHost } }
 const now = (): string => new Date().toISOString()
+const REPOSITORY_HOST = { github: githubHost, gitea: giteaHost } satisfies Record<RepositoryHostKind, RepositoryHost>
 
 /**
  * Composition root of dsh-superagent that connects `Store`, `Setup`, `Engine`, `SourceRegistry`, `Effects`, `Outbox`, `Passes`, `Sessions`, `Settings`, `Prompts`, `DshExecutor`, and `MasterAssessor`.
@@ -85,7 +87,7 @@ export class Runtime extends Service implements SourceHost {
   private readonly toolHost: MainToolsHost & ExecutorToolsHost
   /** Non-zero while a main-Session tool is executing an Engine command, suppressing self-triggered domain event notices. */
   private quiet = 0
-  constructor(ctx: Context, readonly machine: Machine, restart: () => void, repository: RepositoryHost = githubHost) {
+  constructor(ctx: Context, readonly machine: Machine, restart: () => void, repository: RepositoryHost = REPOSITORY_HOST[machine.repositoryHost]) {
     super(ctx, 'orchestrator')
     const runtime = this
     // Lock the state directory before opening the database so another process cannot migrate or write concurrently.
@@ -163,6 +165,8 @@ export class Runtime extends Service implements SourceHost {
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
         get deployment() { return setup.deployment },
         pullClaim: (ticketId, number, signal) => repository.pullClaim(runtime.context(repository.source), ticketId, number, signal),
+        ...repository.openPull ? { openPull: (ticketId: string, draft: PullDraft, signal?: AbortSignal) =>
+          repository.openPull!(runtime.context(repository.source), ticketId, draft, signal) } : {},
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
         quietly: run => { this.quiet++; try { return run() } finally { this.quiet-- } } }
       this.ready = this.initialize()
