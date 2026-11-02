@@ -1,7 +1,7 @@
 {
   "result": "PASS",
-  "at": "2026-11-02T11:03:48.373Z",
-  "testedCommit": "772f6af2590903671f6b5777ff89f2b11b011eef",
+  "at": "2026-11-02T11:31:28.621Z",
+  "testedCommit": "65f32534b7c8213056e61f75571dfad807ef404f",
   "basedOnIssue2": "bf3c2a16703b8671aaf67eabff81d6f9bc441e82",
   "method": "Controlled Gitea HTTP and Git with deterministic fixture DSH agents. No model. Production credential helper built by pnpm check before live scenario.",
   "runtime": {
@@ -13,7 +13,7 @@
   "configuration": {
     "repositoryHost": "gitea",
     "server": "http://127.0.0.1:63847",
-    "repository": "pilot-owner/issue-3-final-r1",
+    "repository": "pilot-owner/issue-3-final-r2",
     "allowed": [
       "pilot-owner"
     ],
@@ -25,21 +25,21 @@
   },
   "check": {
     "typecheck": "PASS",
-    "testFiles": 62,
-    "tests": 1242,
+    "tests": 1247,
+    "testFiles": 63,
     "skippedFiles": 1,
     "build": "PASS"
   },
   "live": {
-    "at": "2026-11-02T11:01:36.981Z",
+    "at": "2026-11-02T11:27:29.029Z",
     "server": "http://127.0.0.1:63847",
-    "repository": "pilot-owner/issue-3-final-r1",
+    "repository": "pilot-owner/issue-3-final-r2",
     "setup": {
       "host": "gitea",
       "version": "28.3.0",
-      "repository": "pilot-owner/issue-3-final-r1",
+      "repository": "pilot-owner/issue-3-final-r2",
       "account": "pilot-agent",
-      "gitScope": "http://127.0.0.1:63847/pilot-owner/issue-3-final-r1.git",
+      "gitScope": "http://127.0.0.1:63847/pilot-owner/issue-3-final-r2.git",
       "helperIsBundled": true
     },
     "intake": [
@@ -62,12 +62,12 @@
       "tickets": 1
     },
     "pullRequest": {
-      "pushedBranch": "agent/greeting-6f16399b3909",
+      "pushedBranch": "agent/greeting-ddc2ecf6132b",
       "number": 2,
       "adoptedOnRepeat": true,
       "follows": [
         {
-          "thread": "gitea:813eec2634e7:2",
+          "thread": "gitea:ecc8d6ad993e:2",
           "own": true
         }
       ]
@@ -130,7 +130,7 @@
   "actualDsh": {
     "version": "0.2.1-rc.3",
     "method": "Fresh isolated real profile and browser settings inspection; processing paused, no model call. Restarted against tested application commit.",
-    "setup": "pass",
+    "setup": "pass after restart at final tested application commit",
     "health": "all ready",
     "account": "pilot-agent",
     "githubAccountConfigured": false,
@@ -142,5 +142,43 @@
     "No live GitHub repository was mutated. Existing support is covered by regression tests.",
     "The deterministic end-to-end scenario uses fixture DSH agents, not model-driven work.",
     "Independent-family review is blocked because the Claude provider is out of credits."
-  ]
+  ],
+  "gitReadback": {
+    "records": [
+      {
+        "outcome": "merged",
+        "branch": "agent/greeting-ddc2ecf6132b",
+        "commit": "bb0021d0b2f4d461fb317640eb52153f4da84119",
+        "file": "greeting-ddc2ecf6132b.txt",
+        "content": "Change the greeting",
+        "matchesApiPullHead": true
+      },
+      {
+        "outcome": "closed",
+        "branch": "agent/button-04b359b4ff41",
+        "commit": "5fff58e9c43a39a8b0801cae7a774c6a4e44be5b",
+        "file": "button-04b359b4ff41.txt",
+        "content": "Rename the button",
+        "matchesApiPullHead": true
+      }
+    ],
+    "main": {
+      "commit": "d11eef37e44d90fb0b55d5105bc4c543fc9f619c",
+      "greetingMerged": true,
+      "closedButtonAbsent": true,
+      "files": [
+        "README.md",
+        "greeting-ddc2ecf6132b.txt"
+      ]
+    },
+    "helperScopeChecks": "pass"
+  },
+  "originalReviewProbes": {
+    "passed": 10,
+    "failed": 0
+  },
+  "authorityRegressions": {
+    "passed": 5,
+    "failed": 0
+  }
 }
